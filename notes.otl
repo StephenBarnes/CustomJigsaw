@@ -1,0 +1,62 @@
+
+I want to implement a website that lets people select an image file on their computer, then makes a jigsaw puzzle that can be assembled with a web UI to make that image. I'd like to also support GIF files, with the puzzle pieces being pieces of that GIF, animated.
+
+Let's make the puzzles just squares. So there's no notches etc. like in classic jigsaw puzzles, just squares that are dragged around.
+
+Let's also make pieces snap together if you put two pieces adjacent to each other (or close to perfectly adjacent) and they belong next to each other in that way, in the full puzzle.
+
+Let's make it a static site, so the image stays local on the user's computer, no uploading.
+
+Let's use just vanilla JS and HTML5. Possibly with a library for handling GIFs or anything else where a library would help.
+
+
+Help me by writing some code to implement this. For now, let's only support static image files, not GIFs, then we can add GIF support later. 
+
+
+
+- When two pieces snap together, we should merge them into one piece. Then this one piece can be moved as one unit. There shouldn't be lines between these joined pieces.
+
+- Instead of having separate pieces-container and puzzle-board, let's only have one board area. The pieces start jumbled up on the sides of that board area, then the player assembles the puzzle in the center. Pieces shouldn't start in the center region, which is the same size as the image. 
+
+
+Ok. Let's make some more changes:
+- When a piece is moved and then snaps together with another piece, we should move its position a bit to align perfectly with the piece it snapped to.
+- Instead of having square options for the puzzle size (like 3x3, 4x4, etc.) let's choose the allowed dimensions so that the pieces are still roughly square. So for example if the image is 200px by 400px, then the options should be more like 2x4 pieces, 3x6 pieces, etc. They don't have to be perfectly square, just approximately.
+
+
+Below is code for a single-page static site that lets the user pick an image file from their computer, then makes a jigsaw puzzle with roughly-square pieces for the user to assemble.
+
+Now I'd like to change this to also support GIFs, and I want the individual puzzle pieces to be animated like the GIF, and in sync with each other. This may be tricky, and we may need to use some library in order to get the frames of the GIF file.
+
+
+
+
+
+Below is code for a single-page static site that lets the user pick an image file from their computer, then makes a jigsaw puzzle with roughly-square pieces for the user to assemble.
+It also supports GIFs, with each piece animated in sync as in the original GIF.
+The user can upload a new image file, which should clean up the previous puzzle and create a new puzzle.
+
+Now I'd like to make some changes to this:
+- When one piece (or multiple linked pieces) is placed down, it could link up with multiple other pieces. Currently it seems to only link with one of the adjacent pieces, not multiple.
+- When the puzzle is solved, the "puzzle solved" message should appear around the bottom of the screen instead of in the middle. Also we should let the finished jigsaw be displayed, not hide it as soon as the puzzle is solved.
+- For linked groups of pieces, currently the white border of one piece, or the shadow of one piece, is visible on top of the linked pieces. We'd like to get rid of that, either by moving that shadow and border to below all the other pieces, or hiding them.
+- Prevent pieces from being dragged completely off the canvas, making them inaccessible. Rather block them from moving further when they reach the edges.
+
+
+
+
+
+
+
+
+// Now I'd like to change this to also support GIFs, and I want the individual puzzle pieces to be animated like the GIF, and in sync with each other. This may be tricky, and we may need to use some library in order to get the frames of the GIF file.
+
+Below is code for a single-page static site that lets the user pick an image file from their computer, then makes a jigsaw puzzle with roughly-square pieces for the user to assemble. Currently supports PNGs and JPGs but not GIFs.
+
+Now I'd like to make some changes to this:
+- Add a DEBUG = true flag, and when that's active, print debug output to console, for better debugging.
+- When one piece (or multiple linked pieces) is placed down, it could link up with multiple other pieces. Currently it seems to only link with one of the adjacent pieces, not multiple.
+- When the puzzle is solved, the "puzzle solved" message should appear around the bottom of the screen instead of in the middle. Also we should let the finished jigsaw be displayed, not hide it as soon as the puzzle is solved.
+- For linked groups of pieces, currently the white border of one piece, or the shadow of one piece, is visible on top of the linked pieces. We'd like to get rid of that, either by moving that shadow and border to below all the other pieces, or hiding them.
+- Prevent pieces from being dragged completely off the canvas, making them inaccessible. Rather block them from moving further when they reach the edges.
+

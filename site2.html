@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jigsaw Puzzle Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: none; /* Prevents scrolling on touch devices while dragging */
+            overflow: hidden; /* Hide scrollbars as board might be large */
+        }
+        .puzzle-group {
+            position: absolute;
+            cursor: grab;
+            z-index: 10;
+            /* Use filter for a shadow that respects the combined shape of pieces */
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25));
+            transition: filter 0.1s ease-in-out, z-index 0s 0.1s;
+        }
+        .puzzle-group.dragging {
+            cursor: grabbing;
+            z-index: 20;
+            filter: drop-shadow(0 10px 15px rgba(0,0,0,0.25));
+            transition: filter 0.1s ease-in-out;
+        }
+        .puzzle-piece {
+            position: absolute;
+            /* Box-shadow moved to puzzle-group's filter property */
+            border: 1px solid white;
+            transition: transform 0.1s ease-in-out;
+        }
+        .puzzle-group.dragging .puzzle-piece {
+            transform: scale(1.025);
+        }
+        #puzzle-board {
+            background-color: #f0f4f8;
+            position: relative;
+            overflow: hidden; /* Changed from visible to hidden to contain pieces */
+            border-radius: 0.5rem;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
+            transform-style: preserve-3d;
+        }
+        #assembly-area {
+            position: absolute;
+            border: 2px dashed #cbd5e1;
+            box-sizing: border-box;
+            pointer-events: none;
+        }
+        .control-panel {
+            background-color: white;
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        /* Win message style */
+        #win-message {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+            padding: 2rem 1rem;
+            box-sizing: border-box;
+            opacity: 0;
+            transform: translateY(100%);
+            pointer-events: none;
+            transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+        }
+        #win-message.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+        .win-message-content {
+            text-align: center;
+            padding: 1.5rem 3rem;
+            background-color: #2f855a; /* A darker green */
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+        .win-message-content h2 {
+            font-size: 3rem;
+            font-weight: bold;
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 flex flex-col items-center justify-center h-screen p-4">
+
+    <div class="w-full max-w-7xl mx-auto flex flex-col h-full">
+        <header class="text-center mb-4 shrink-0">
+            <h1 class="text-4xl font-bold text-slate-700">Image Jigsaw Puzzle</h1>
+            <p class="text-slate-500 mt-2">Select an image, then assemble the puzzle in the center.</p>
+        </header>
+
+        <div class="control-panel mb-4 flex flex-col sm:flex-row items-center justify-center gap-4 shrink-0">
+            <div>
+                <label for="image-loader" class="cursor-pointer bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600 transition-colors">
+                    Select Image
+                </label>
+                <input type="file" id="image-loader" class="hidden" accept="image/png, image/jpeg">
+            </div>
+
+            <div class="flex items-center gap-3">
+                <label for="puzzle-size" class="font-medium">Difficulty:</label>
+                <input type="range" id="puzzle-size" min="3" max="12" value="4" class="w-32 cursor-pointer">
+                <span id="size-label" class="font-semibold w-12 text-center">4x4</span>
+            </div>
+
+            <button id="scramble-btn" class="bg-green-500 text-white font-bold py-2 px-4 rounded-md hover:bg-green-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed" disabled>
+                Re-Scramble
+            </button>
+        </div>
+
+        <main id="puzzle-board-container" class="flex-grow w-full flex items-center justify-center relative bg-white rounded-lg shadow-md overflow-hidden">
+            <div id="puzzle-board">
+                <p id="board-placeholder" class="text-slate-400 absolute inset-0 flex items-center justify-center">The puzzle board is empty</p>
+                <div id="win-message">
+                    <div class="win-message-content">
+                        <h2>Puzzle Solved!</h2>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- Global State and Constants ---
+        const DEBUG = true; // Set to true for console debug output
+
+        const imageLoader = document.getElementById('image-loader');
+        const puzzleSizeSlider = document.getElementById('puzzle-size');
+        const sizeLabel = document.getElementById('size-label');
+        const scrambleBtn = document.getElementById('scramble-btn');
+        const puzzleBoard = document.getElementById('puzzle-board');
+        const boardPlaceholder = document.getElementById('board-placeholder');
+        const winMessage = document.getElementById('win-message');
+        
+        let assemblyArea = null; // Will be created dynamically
+        let originalImage = null; // Will hold the user's uploaded, un-padded image
+        let srcImage = null; // Will hold the padded canvas used for the puzzle
+        let imageAspectRatio = 1;
+        let pieceGroups = [];
+        let basePuzzleSize = 4;
+        let puzzleSizeX = 4;
+        let puzzleSizeY = 4;
+        let pieceWidth = 0;
+        let pieceHeight = 0;
+        let puzzleSolved = false; // Flag to disable dragging on win
+        const SNAP_TOLERANCE = 25;
+
+        // --- Debug Logging ---
+        function debugLog(...args) {
+            if (DEBUG) {
+                console.log(...args);
+            }
+        }
+
+        // --- Event Listeners ---
+        imageLoader.addEventListener('change', handleImage);
+        puzzleSizeSlider.addEventListener('input', (e) => {
+            basePuzzleSize = parseInt(e.target.value);
+            if (originalImage) { // Check if an original image has been loaded
+                // Recalculate everything starting from the original image
+                imageAspectRatio = originalImage.width / originalImage.height;
+                updatePuzzleDimensions();
+
+                // Re-create the padded image with the new grid dimensions
+                srcImage = createPaddedImage();
+                
+                // Update aspect ratio for layout using the new padded image
+                imageAspectRatio = srcImage.width / srcImage.height;
+
+                createPuzzle();
+            } else {
+                sizeLabel.textContent = `${basePuzzleSize}x${basePuzzleSize}`;
+            }
+        });
+        scrambleBtn.addEventListener('click', () => {
+            if (srcImage) createPuzzle();
+        });
+
+        // --- Image Handling & Dimensions ---
+        function handleImage(e) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const tempImage = new Image();
+                tempImage.onload = () => {
+                    scrambleBtn.disabled = false;
+                    originalImage = tempImage; // Store the original
+                    
+                    // First, calculate dimensions based on the ORIGINAL image aspect ratio
+                    imageAspectRatio = originalImage.width / originalImage.height;
+                    updatePuzzleDimensions(); 
+                    
+                    // Now, create a padded canvas and use it as the source image for the puzzle
+                    srcImage = createPaddedImage();
+                    
+                    // Then, update the aspect ratio for layout purposes based on the PADDED image
+                    imageAspectRatio = srcImage.width / srcImage.height;
+                    
+                    createPuzzle();
+                };
+                tempImage.src = event.target.result;
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        }
+        
+        /**
+         * Creates a new canvas with dimensions that are multiples of the puzzle grid size.
+         * It pads the original image with white pixels to fit these new dimensions.
+         * This ensures that piece sizes can be integers, preventing image cropping.
+         */
+        function createPaddedImage() {
+            if (!originalImage) return null;
+
+            const originalWidth = originalImage.width;
+            const originalHeight = originalImage.height;
+
+            // Calculate the new dimensions that are multiples of the puzzle grid size
+            const paddedWidth = Math.ceil(originalWidth / puzzleSizeX) * puzzleSizeX;
+            const paddedHeight = Math.ceil(originalHeight / puzzleSizeY) * puzzleSizeY;
+            
+            // Only log if padding was actually added
+            if (paddedWidth !== originalWidth || paddedHeight !== originalHeight) {
+                debugLog(`Original size: ${originalWidth}x${originalHeight}, Padded to: ${paddedWidth}x${paddedHeight}`);
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = paddedWidth;
+            canvas.height = paddedHeight;
+            const ctx = canvas.getContext('2d');
+
+            // Fill the background with white
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, paddedWidth, paddedHeight);
+
+            // Draw the original image onto the padded canvas (at top-left)
+            ctx.drawImage(originalImage, 0, 0, originalWidth, originalHeight);
+
+            return canvas;
+        }
+
+        function updatePuzzleDimensions() {
+            if (imageAspectRatio > 1) { // Landscape
+                puzzleSizeX = Math.round(basePuzzleSize * imageAspectRatio);
+                puzzleSizeY = basePuzzleSize;
+            } else { // Portrait or square
+                puzzleSizeX = basePuzzleSize;
+                puzzleSizeY = Math.round(basePuzzleSize / imageAspectRatio);
+            }
+            debugLog("Approximate puzzle grid: ", puzzleSizeX, "x", puzzleSizeY);
+            sizeLabel.textContent = `${puzzleSizeX}x${puzzleSizeY}`;
+        }
+
+        // --- Puzzle Creation ---
+        function createPuzzle() {
+            debugLog('Creating puzzle...');
+            pieceGroups = [];
+            puzzleSolved = false; // Reset solved state
+            puzzleBoard.innerHTML = ''; // Clear previous puzzle pieces
+            
+            // Re-create core elements
+            assemblyArea = document.createElement('div');
+            assemblyArea.id = 'assembly-area';
+            puzzleBoard.appendChild(assemblyArea);
+            puzzleBoard.appendChild(boardPlaceholder);
+            puzzleBoard.appendChild(winMessage);
+            winMessage.classList.remove('show');
+            boardPlaceholder.style.display = 'none';
+
+            const container = puzzleBoard.parentElement;
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+            
+            // Size the assembly area to be a portion of the board
+            let assemblyWidth = containerWidth * 0.5;
+            let assemblyHeight = assemblyWidth / imageAspectRatio;
+
+            if (assemblyHeight > containerHeight * 0.8) {
+                assemblyHeight = containerHeight * 0.8;
+                assemblyWidth = assemblyHeight * imageAspectRatio;
+            }
+            
+            const boardWidth = containerWidth;
+            const boardHeight = containerHeight;
+            puzzleBoard.style.width = `${boardWidth}px`;
+            puzzleBoard.style.height = `${boardHeight}px`;
+
+            // This calculation is now more robust. Because the srcImage is padded,
+            // pieceWidth and pieceHeight in the source will be perfect integers.
+            // This calculation for the *display* size still prevents sub-pixel gaps.
+            pieceWidth = Math.max(1, Math.floor(assemblyWidth / puzzleSizeX));
+            pieceHeight = Math.max(1, Math.floor(assemblyHeight / puzzleSizeY));
+            debugLog(`Calculated integer piece display size: ${pieceWidth}x${pieceHeight}`);
+
+            assemblyWidth = pieceWidth * puzzleSizeX;
+            assemblyHeight = pieceHeight * puzzleSizeY;
+
+            const assemblyX = (boardWidth - assemblyWidth) / 2;
+            const assemblyY = (boardHeight - assemblyHeight) / 2;
+
+            assemblyArea.style.width = `${assemblyWidth}px`;
+            assemblyArea.style.height = `${assemblyHeight}px`;
+            assemblyArea.style.left = `${assemblyX}px`;
+            assemblyArea.style.top = `${assemblyY}px`;
+
+            for (let y = 0; y < puzzleSizeY; y++) {
+                for (let x = 0; x < puzzleSizeX; x++) {
+                    const piece = createPieceCanvas(x, y);
+                    const group = createPieceGroup(piece);
+                    placeGroupRandomly(group, boardWidth, boardHeight, { x: assemblyX, y: assemblyY, width: assemblyWidth, height: assemblyHeight });
+                    
+                    puzzleBoard.appendChild(group.element);
+                    pieceGroups.push(group);
+                }
+            }
+        }
+        
+        function createPieceCanvas(x, y) {
+            const piece = document.createElement('canvas');
+            piece.className = 'puzzle-piece';
+            
+            // Use integer piece sizes for canvas dimensions
+            piece.width = pieceWidth;
+            piece.height = pieceHeight;
+
+            piece.style.left = '0px';
+            piece.style.top = '0px';
+            piece.dataset.correctX = x;
+            piece.dataset.correctY = y;
+            
+            const ctx = piece.getContext('2d');
+            
+            // Because srcImage is the padded canvas, these calculations will result in integer source dimensions.
+            const sourcePieceWidth = srcImage.width / puzzleSizeX;
+            const sourcePieceHeight = srcImage.height / puzzleSizeY;
+
+            ctx.drawImage(
+                srcImage, // The padded source canvas
+                x * sourcePieceWidth, y * sourcePieceHeight,
+                sourcePieceWidth, sourcePieceHeight,
+                0, 0,
+                pieceWidth, pieceHeight // Draw onto the scaled display canvas
+            );
+            return piece;
+        }
+
+        function createPieceGroup(initialPiece) {
+            const groupElement = document.createElement('div');
+            groupElement.className = 'puzzle-group';
+            groupElement.appendChild(initialPiece);
+
+            const group = {
+                element: groupElement,
+                pieces: [initialPiece],
+                minX: parseInt(initialPiece.dataset.correctX),
+                minY: parseInt(initialPiece.dataset.correctY),
+                widthInPieces: 1,
+                heightInPieces: 1,
+            };
+            addDragListeners(group);
+            return group;
+        }
+        
+        function placeGroupRandomly(group, boardW, boardH, assemblyRect) {
+            const pieceElem = group.pieces[0];
+            const pw = pieceElem.width;
+            const ph = pieceElem.height;
+            let x, y;
+
+            const placementArea = Math.floor(Math.random() * 4);
+            switch (placementArea) {
+                case 0: // Top margin
+                    x = Math.random() * (boardW - pw);
+                    y = Math.random() * (assemblyRect.y - ph);
+                    break;
+                case 1: // Bottom margin
+                    x = Math.random() * (boardW - pw);
+                    y = (assemblyRect.y + assemblyRect.height) + Math.random() * (boardH - (assemblyRect.y + assemblyRect.height) - ph);
+                    break;
+                case 2: // Left margin
+                    x = Math.random() * (assemblyRect.x - pw);
+                    y = Math.random() * (boardH - ph);
+                    break;
+                default: // Right margin
+                    x = (assemblyRect.x + assemblyRect.width) + Math.random() * (boardW - (assemblyRect.x + assemblyRect.width) - pw);
+                    y = Math.random() * (boardH - ph);
+                    break;
+            }
+            group.element.style.left = `${Math.max(0, x)}px`;
+            group.element.style.top = `${Math.max(0, y)}px`;
+        }
+
+
+        // --- Drag and Drop Logic ---
+        function addDragListeners(group) {
+            let offsetX, offsetY;
+            const groupElement = group.element;
+
+            function onDragStart(e) {
+                if (puzzleSolved) return; // Prevent dragging when solved
+                e.preventDefault();
+                groupElement.classList.add('dragging');
+                puzzleBoard.appendChild(groupElement); // Bring to top
+
+                const clientX = e.clientX || e.touches[0].clientX;
+                const clientY = e.clientY || e.touches[0].clientY;
+                
+                const rect = groupElement.getBoundingClientRect();
+                offsetX = clientX - rect.left;
+                offsetY = clientY - rect.top;
+                
+                document.addEventListener('mousemove', onDragMove);
+                document.addEventListener('mouseup', onDragEnd);
+                document.addEventListener('touchmove', onDragMove, { passive: false });
+                document.addEventListener('touchend', onDragEnd);
+            }
+
+            function onDragMove(e) {
+                e.preventDefault();
+                const clientX = e.clientX || e.touches[0].clientX;
+                const clientY = e.clientY || e.touches[0].clientY;
+                const boardRect = puzzleBoard.getBoundingClientRect();
+                
+                let newX = clientX - boardRect.left - offsetX;
+                let newY = clientY - boardRect.top - offsetY;
+
+                // Constrain piece movement to within the puzzle board
+                const groupWidth = group.widthInPieces * pieceWidth;
+                const groupHeight = group.heightInPieces * pieceHeight;
+
+                const maxX = puzzleBoard.clientWidth - groupWidth;
+                const maxY = puzzleBoard.clientHeight - groupHeight;
+
+                newX = Math.max(0, Math.min(newX, maxX));
+                newY = Math.max(0, Math.min(newY, maxY));
+                
+                groupElement.style.left = `${newX}px`;
+                groupElement.style.top = `${newY}px`;
+            }
+
+            function onDragEnd(e) {
+                groupElement.classList.remove('dragging');
+                document.removeEventListener('mousemove', onDragMove);
+                document.removeEventListener('mouseup', onDragEnd);
+                document.removeEventListener('touchmove', onDragMove);
+                document.removeEventListener('touchend', onDragEnd);
+                
+                checkForMultiSnap(group);
+            }
+
+            groupElement.addEventListener('mousedown', onDragStart);
+            groupElement.addEventListener('touchstart', onDragStart, { passive: true });
+        }
+
+        // --- Snapping and Merging Logic ---
+        function checkForMultiSnap(draggedGroup) {
+            let groupToCheck = draggedGroup;
+            let madeAMerge = true;
+
+            while (madeAMerge) {
+                madeAMerge = false;
+                for (let i = pieceGroups.length - 1; i >= 0; i--) {
+                    const stationaryGroup = pieceGroups[i];
+                    if (stationaryGroup === groupToCheck) continue;
+
+                    const snapResult = findAndPerformSnap(groupToCheck, stationaryGroup);
+
+                    if (snapResult) {
+                        debugLog("Snap found and merged!");
+                        groupToCheck = stationaryGroup; // The new merged group is the stationary one
+                        madeAMerge = true;
+                        break; // Restart the loop to check the new, larger group against all others
+                    }
+                }
+            }
+        }
+
+        function findAndPerformSnap(draggedGroup, stationaryGroup) {
+            for (const draggedPiece of draggedGroup.pieces) {
+                for (const stationaryPiece of stationaryGroup.pieces) {
+                    const snapDirection = checkAdjacency(draggedPiece, stationaryPiece);
+                    if (snapDirection) {
+                        alignAndMerge(draggedGroup, stationaryGroup, draggedPiece, stationaryPiece, snapDirection);
+                        return true; // Indicate a snap occurred
+                    }
+                }
+            }
+            return false;
+        }
+
+        function checkAdjacency(draggedPiece, stationaryPiece) {
+            const dpX = parseInt(draggedPiece.dataset.correctX);
+            const dpY = parseInt(draggedPiece.dataset.correctY);
+            const spX = parseInt(stationaryPiece.dataset.correctX);
+            const spY = parseInt(stationaryPiece.dataset.correctY);
+            
+            const draggedRect = draggedPiece.getBoundingClientRect();
+            const stationaryRect = stationaryPiece.getBoundingClientRect();
+            
+            if (dpX === spX + 1 && dpY === spY && Math.abs(draggedRect.left - stationaryRect.right) < SNAP_TOLERANCE && Math.abs(draggedRect.top - stationaryRect.top) < SNAP_TOLERANCE) return 'right';
+            if (dpX === spX - 1 && dpY === spY && Math.abs(draggedRect.right - stationaryRect.left) < SNAP_TOLERANCE && Math.abs(draggedRect.top - stationaryRect.top) < SNAP_TOLERANCE) return 'left';
+            if (dpY === spY + 1 && dpX === spX && Math.abs(draggedRect.top - stationaryRect.bottom) < SNAP_TOLERANCE && Math.abs(draggedRect.left - stationaryRect.left) < SNAP_TOLERANCE) return 'down';
+            if (dpY === spY - 1 && dpX === spX && Math.abs(draggedRect.bottom - stationaryRect.top) < SNAP_TOLERANCE && Math.abs(draggedRect.left - stationaryRect.left) < SNAP_TOLERANCE) return 'up';
+            
+            return null;
+        }
+        
+        function alignAndMerge(draggedGroup, stationaryGroup, draggedPiece, stationaryPiece, direction) {
+            const stationaryGroupPos = { left: stationaryGroup.element.offsetLeft, top: stationaryGroup.element.offsetTop };
+            const stationaryPieceOffset = { left: parseFloat(stationaryPiece.style.left), top: parseFloat(stationaryPiece.style.top) };
+            const draggedPieceOffset = { left: parseFloat(draggedPiece.style.left), top: parseFloat(draggedPiece.style.top) };
+
+            let targetLeft, targetTop;
+
+            switch (direction) {
+                case 'right': // Snap dragged piece to the right of stationary
+                    targetLeft = stationaryGroupPos.left + stationaryPieceOffset.left + pieceWidth - draggedPieceOffset.left;
+                    targetTop = stationaryGroupPos.top + stationaryPieceOffset.top - draggedPieceOffset.top;
+                    break;
+                case 'left':
+                    targetLeft = stationaryGroupPos.left + stationaryPieceOffset.left - pieceWidth - draggedPieceOffset.left;
+                    targetTop = stationaryGroupPos.top + stationaryPieceOffset.top - draggedPieceOffset.top;
+                    break;
+                case 'down':
+                    targetLeft = stationaryGroupPos.left + stationaryPieceOffset.left - draggedPieceOffset.left;
+                    targetTop = stationaryGroupPos.top + stationaryPieceOffset.top + pieceHeight - draggedPieceOffset.top;
+                    break;
+                case 'up':
+                    targetLeft = stationaryGroupPos.left + stationaryPieceOffset.left - draggedPieceOffset.left;
+                    targetTop = stationaryGroupPos.top + stationaryPieceOffset.top - pieceHeight - draggedPieceOffset.top;
+                    break;
+            }
+            
+            draggedGroup.element.style.left = `${targetLeft}px`;
+            draggedGroup.element.style.top = `${targetTop}px`;
+
+            mergeGroups(draggedGroup, stationaryGroup);
+        }
+
+        function mergeGroups(draggedGroup, stationaryGroup) {
+            const draggedEl = draggedGroup.element;
+            const stationaryEl = stationaryGroup.element;
+            
+            const offsetX = draggedEl.offsetLeft - stationaryEl.offsetLeft;
+            const offsetY = draggedEl.offsetTop - stationaryEl.offsetTop;
+
+            while (draggedEl.firstChild) {
+                const piece = draggedEl.firstChild;
+                piece.style.left = `${parseFloat(piece.style.left) + offsetX}px`;
+                piece.style.top = `${parseFloat(piece.style.top) + offsetY}px`;
+                stationaryEl.appendChild(piece);
+                stationaryGroup.pieces.push(piece);
+            }
+
+            // Normalize the group so its origin (0,0) is the top-leftmost piece.
+            let minPixelX = Infinity;
+            let minPixelY = Infinity;
+
+            for (const piece of stationaryGroup.pieces) {
+                const pieceLeft = parseFloat(piece.style.left);
+                const pieceTop = parseFloat(piece.style.top);
+                if (pieceLeft < minPixelX) minPixelX = pieceLeft;
+                if (pieceTop < minPixelY) minPixelY = pieceTop;
+            }
+            
+            if (minPixelX !== 0 || minPixelY !== 0) {
+                debugLog(`Normalizing group. Offset: (${minPixelX}, ${minPixelY})`);
+                stationaryEl.style.left = `${stationaryEl.offsetLeft + minPixelX}px`;
+                stationaryEl.style.top = `${stationaryEl.offsetTop + minPixelY}px`;
+                
+                for (const piece of stationaryGroup.pieces) {
+                    piece.style.left = `${parseFloat(piece.style.left) - minPixelX}px`;
+                    piece.style.top = `${parseFloat(piece.style.top) - minPixelY}px`;
+                }
+            }
+
+            puzzleBoard.removeChild(draggedEl);
+            pieceGroups = pieceGroups.filter(g => g !== draggedGroup);
+            
+            stationaryGroup.minX = Math.min(stationaryGroup.minX, draggedGroup.minX);
+            stationaryGroup.minY = Math.min(stationaryGroup.minY, draggedGroup.minY);
+
+            // Recalculate the bounding box of the merged group
+            let maxX = stationaryGroup.minX;
+            let maxY = stationaryGroup.minY;
+
+            for (const piece of stationaryGroup.pieces) {
+                const px = parseInt(piece.dataset.correctX);
+                const py = parseInt(piece.dataset.correctY);
+                if (px > maxX) maxX = px;
+                if (py > maxY) maxY = py;
+            }
+
+            stationaryGroup.widthInPieces = maxX - stationaryGroup.minX + 1;
+            stationaryGroup.heightInPieces = maxY - stationaryGroup.minY + 1;
+            debugLog(`Merged group new size: ${stationaryGroup.widthInPieces}x${stationaryGroup.heightInPieces}`);
+
+            checkWinCondition();
+        }
+
+        function checkWinCondition() {
+            if (pieceGroups.length === 1 && pieceGroups[0].pieces.length === puzzleSizeX * puzzleSizeY) {
+                debugLog("PUZZLE SOLVED!");
+                const finalGroup = pieceGroups[0];
+                
+                const finalX = assemblyArea.offsetLeft - (finalGroup.minX * pieceWidth);
+                const finalY = assemblyArea.offsetTop - (finalGroup.minY * pieceHeight);
+                
+                finalGroup.element.style.transition = 'left 0.5s, top 0.5s, filter 0.5s';
+                finalGroup.element.style.left = `${finalX}px`;
+                finalGroup.element.style.top = `${finalY}px`;
+                finalGroup.element.style.cursor = 'default';
+                finalGroup.element.style.zIndex = '5'; // Place it behind UI but above board
+                finalGroup.element.style.filter = 'none'; // Remove shadow on final placement
+
+                // Use a flag to disable event listeners.
+                puzzleSolved = true;
+                
+                winMessage.classList.add('show');
+            }
+        }
+    </script>
+</body>
+</html>
