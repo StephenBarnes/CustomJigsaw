@@ -181,7 +181,7 @@
 				</p>
 				<div id="win-message">
 					<div class="win-message-content">
-						<h2>Puzzle Solved!</h2>
+						<h2>Puzzle solved!</h2>
 					</div>
 				</div>
 			</div>
@@ -964,8 +964,25 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 					break;
 			}
 
+			// Initial placement
 			group.element.style.left = `${Math.max(0, x || 0)}px`;
-			group.element.style.top = `${Math.max(0, y || 0)}px`;
+			group.element.style.top  = `${Math.max(0, y || 0)}px`;
+
+			// Push pieces fully back on-screen if any side overflows ---
+			// (This handles cases where there is no space on a chosen side.)
+			const groupWidth  = group.widthInPieces  * pieceWidth;   // 1 piece initially
+			const groupHeight = group.heightInPieces * pieceHeight;
+			const maxX = Math.max(0, boardW - groupWidth);
+			const maxY = Math.max(0, boardH - groupHeight);
+
+			let nx = parseFloat(group.element.style.left) || 0;
+			let ny = parseFloat(group.element.style.top)  || 0;
+
+			nx = Math.min(Math.max(nx, 0), maxX);
+			ny = Math.min(Math.max(ny, 0), maxY);
+
+			group.element.style.left = `${nx | 0}px`;
+			group.element.style.top  = `${ny | 0}px`;
 		}
 
 		function addDragListeners(group) {
