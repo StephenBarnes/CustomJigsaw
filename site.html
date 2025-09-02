@@ -71,6 +71,10 @@
 			box-shadow: 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -2px rgba(0, 0, 0, .05)
 		}
 
+		.corner-notes {
+			font-size: x-small !important;
+		}
+
 		#win-message {
 			position: absolute;
 			bottom: 0;
@@ -131,10 +135,11 @@
 		<!-- Header with helper text to the right -->
 		<header class="mb-3 shrink-0">
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<h1 class="text-4xl font-bold text-slate-700 dark:text-slate-200">Image Jigsaw Puzzle</h1>
-				<p class="text-slate-800 dark:text-slate-200 text-sm sm:text-base">
-					Select an image, then assemble the puzzle in the center.
-				</p>
+				<h1 class="text-4xl font-bold text-slate-700 dark:text-slate-200">Custom jigsaw puzzle</h1>
+				<span class="corner-notes text-slate-800 dark:text-slate-200 text-sm sm:text-base">
+					<p>Runs entirely in your browser - your images are not sent to any other computer.</p>
+					<p>Supports animated GIFs! If 3x3 or smaller doesn't work, update your browser.</p>
+				</span>
 			</div>
 		</header>
 
@@ -273,6 +278,8 @@
 		let animRAF = null;
 		let animRunning = false;
 
+		function clamp(val, min, max) { return Math.max(min, Math.min(val, max)); }
+
 		/* ================================
 		Building difficulty options around current image aspect.
 		================================ */
@@ -402,9 +409,9 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 			if (!frameSource?.ready) return;
 			cancelAnimationFrame(resizeRAF);
 			resizeRAF = requestAnimationFrame(() => {
-				log('window.resize → rebuild');
-				buildDifficultyOptions();
-				createPuzzle();
+				log('window.resize → relayout (preserve groups)');
+				buildDifficultyOptions();           // keep dropdown labels up to date
+				relayoutPuzzlePreserveGroups();     // <— new function (see below)
 			});
 		});
 
@@ -841,6 +848,103 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 			}
 
 			log('createPuzzle done', { token: myToken, pieces: pieceGroups.length });
+		}
+
+		function relayoutPuzzlePreserveGroups() {
+			if (!assemblyArea || !pieceGroups.length) return;
+
+			// 1) Recompute layout from container just like in createPuzzle()
+			const container = puzzleBoard.parentElement;
+			const containerWidth = container.clientWidth;
+			const containerHeight = container.clientHeight;
+
+			if (containerWidth < 10 || containerHeight < 10) return;
+
+			const paddedAspect = sliceSourceW / sliceSourceH;
+
+			// Board fills container
+			const boardWidth = containerWidth;
+			const boardHeight = containerHeight;
+			puzzleBoard.style.width = `${boardWidth}px`;
+			puzzleBoard.style.height = `${boardHeight}px`;
+
+			// Assembly area sizing (same policy as createPuzzle: ~70% width, <=90% height)
+			let assemblyWidth = Math.floor(boardWidth * 0.7);
+			let assemblyHeight = Math.round(assemblyWidth / paddedAspect);
+			if (assemblyHeight > Math.floor(boardHeight * 0.9)) {
+				assemblyHeight = Math.floor(boardHeight * 0.9);
+				assemblyWidth = Math.round(assemblyHeight * paddedAspect);
+			}
+
+			// Recompute piece size from the assembly grid
+			pieceWidth = Math.max(1, Math.floor(assemblyWidth / puzzleSizeX));
+			pieceHeight = Math.max(1, Math.floor(assemblyHeight / puzzleSizeY));
+			assemblyWidth = pieceWidth * puzzleSizeX;
+			assemblyHeight = pieceHeight * puzzleSizeY;
+
+			const assemblyX = (boardWidth - assemblyWidth) / 2;
+			const assemblyY = (boardHeight - assemblyHeight) / 2;
+
+			// Update assemblyArea rect
+			assemblyArea.style.width = `${assemblyWidth}px`;
+			assemblyArea.style.height = `${assemblyHeight}px`;
+			assemblyArea.style.left = `${assemblyX}px`;
+			assemblyArea.style.top = `${assemblyY}px`;
+
+			// 2) Resize every piece canvas and reposition inside its current group
+			const sw = sliceSourceW / puzzleSizeX;
+			const sh = sliceSourceH / puzzleSizeY;
+
+			for (const group of pieceGroups) {
+				// Resize each piece & reposition relative to group's min grid cell
+				for (const piece of group.pieces) {
+					const gx = parseInt(piece.dataset.correctX, 10);
+					const gy = parseInt(piece.dataset.correctY, 10);
+
+					// Resize canvas pixels and CSS size
+					piece.width = Math.max(1, pieceWidth);
+					piece.height = Math.max(1, pieceHeight);
+					piece.style.width = `${pieceWidth}px`;
+					piece.style.height = `${pieceHeight}px`;
+
+					// Place inside group based on grid offset from group's min
+					const localLeft = (gx - group.minX) * pieceWidth;
+					const localTop = (gy - group.minY) * pieceHeight;
+					piece.style.left = `${localLeft | 0}px`;
+					piece.style.top = `${localTop | 0}px`;
+				}
+			}
+
+			// 3) Clamp each group to keep it within the new board bounds
+			for (const group of pieceGroups) {
+				const groupEl = group.element;
+				const gW = group.widthInPieces * pieceWidth;
+				const gH = group.heightInPieces * pieceHeight;
+
+				const maxX = Math.max(0, puzzleBoard.clientWidth - gW);
+				const maxY = Math.max(0, puzzleBoard.clientHeight - gH);
+
+				const curX = parseFloat(groupEl.style.left) || 0;
+				const curY = parseFloat(groupEl.style.top) || 0;
+
+				const nx = clamp(curX, 0, maxX) | 0;
+				const ny = clamp(curY, 0, maxY) | 0;
+
+				if (nx !== curX) groupEl.style.left = `${nx}px`;
+				if (ny !== curY) groupEl.style.top = `${ny}px`;
+			}
+
+			// 4) Repaint pieces at their new sizes (important for scaling + GIF sync)
+			repaintAllPiecesFromSlice();
+
+			// 5) If the puzzle is already solved, re-center the final group into the new assembly rect
+			if (puzzleSolved && pieceGroups.length === 1) {
+				const finalGroup = pieceGroups[0];
+				const finalX = assemblyX - (finalGroup.minX * pieceWidth);
+				const finalY = assemblyY - (finalGroup.minY * pieceHeight);
+				finalGroup.element.style.left = `${finalX | 0}px`;
+				finalGroup.element.style.top = `${finalY | 0}px`;
+			}
 		}
 
 		function createPieceCanvas(gridX, gridY, sw, sh) {
