@@ -5,11 +5,17 @@
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>Custom Jigsaw Puzzle</title>
+
+	<!-- Enable class-based dark mode for Tailwind -->
 	<script src="https://cdn.tailwindcss.com"></script>
+	<script>
+		window.tailwind = window.tailwind || {};
+		tailwind.config = { darkMode: 'class' };
+	</script>
+
 	<script src="https://unpkg.com/gifler@0.1.0/gifler.min.js"></script>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 	<style>
-		:root { color-scheme: light dark; }
 		html, body { height: 100%; }
 		body {
 			font-family: 'Inter', sans-serif;
@@ -24,7 +30,6 @@
 			filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .25));
 			transition: filter .1s, z-index 0s .1s
 		}
-
 		.puzzle-group.dragging {
 			cursor: grabbing;
 			z-index: 20;
@@ -37,10 +42,7 @@
 			transition: transform .1s;
 			background: rgba(0, 0, 0, 0.02)
 		}
-
-		.puzzle-group.dragging .puzzle-piece {
-			transform: scale(1.025)
-		}
+		.puzzle-group.dragging .puzzle-piece { transform: scale(1.025) }
 
 		#puzzle-board {
 			background: #f0f4f8;
@@ -49,6 +51,11 @@
 			border-radius: .5rem;
 			box-shadow: inset 0 2px 4px rgba(0, 0, 0, .06)
 		}
+		/* Dark theme tweaks */
+		:root.dark #puzzle-board { background: #0b1220; box-shadow: inset 0 2px 6px rgba(0,0,0,.35) }
+		:root.dark .control-panel { background: #0f172a; box-shadow: 0 10px 15px -3px rgba(0,0,0,.5), 0 4px 6px -2px rgba(0,0,0,.4) }
+		:root.dark #assembly-area { border-color: #334155 }
+		:root.dark .win-message-content { background: #166534 }
 
 		#assembly-area {
 			position: absolute;
@@ -59,7 +66,7 @@
 
 		.control-panel {
 			background: #fff;
-			padding: 1.5rem;
+			padding: 0.5rem;
 			border-radius: .75rem;
 			box-shadow: 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -2px rgba(0, 0, 0, .05)
 		}
@@ -77,14 +84,10 @@
 			opacity: 0;
 			transform: translateY(100%);
 			pointer-events: none;
-			transition: opacity .5s, transform .5s
+			transition: opacity .5s, transform .5s;
+			z-index: 9000;
 		}
-
-		#win-message.show {
-			opacity: 1;
-			transform: translateY(0);
-			pointer-events: auto
-		}
+		#win-message.show { opacity: 1; transform: translateY(0); pointer-events: auto }
 
 		.win-message-content {
 			text-align: center;
@@ -93,12 +96,7 @@
 			border-radius: .75rem;
 			box-shadow: 0 10px 25px rgba(0, 0, 0, .3)
 		}
-
-		.win-message-content h2 {
-			font-size: 3rem;
-			font-weight: 700;
-			color: #fff
-		}
+		.win-message-content h2 { font-size: 3rem; font-weight: 700; color: #fff }
 
 		/* DEBUG HUD */
 		#debug-hud {
@@ -116,51 +114,31 @@
 			z-index: 9999;
 			display: none
 		}
-
-		#debug-hud h3 {
-			font-weight: 700;
-			margin-bottom: .25rem
-		}
-
+		#debug-hud h3 { font-weight: 700; margin-bottom: .25rem }
 		#debug-hud pre {
 			font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-			font-size: 12px;
-			line-height: 1.3;
-			white-space: pre-wrap;
-			word-break: break-word
+			font-size: 12px; line-height: 1.3; white-space: pre-wrap; word-break: break-word
 		}
-
-		#debug-row {
-			display: flex;
-			gap: .75rem;
-			align-items: flex-start;
-			margin-top: .5rem
-		}
-
-		#debug-padded {
-			background: repeating-conic-gradient(#111 0% 25%, #222 0% 50%) 50%/20px 20px;
-			outline: 1px solid #475569;
-			max-width: 24vw;
-			height: auto
-		}
-
-		#debug-controls {
-			display: flex;
-			gap: .5rem;
-			align-items: center;
-			margin: .25rem 0 .5rem
-		}
+		#debug-row { display: flex; gap: .75rem; align-items: flex-start; margin-top: .5rem }
+		#debug-padded { background: repeating-conic-gradient(#111 0% 25%, #222 0% 50%) 50%/20px 20px; outline: 1px solid #475569; max-width: 24vw; height: auto }
+		#debug-controls { display: flex; gap: .5rem; align-items: center; margin: .25rem 0 .5rem }
 	</style>
 </head>
 
-<body class="bg-slate-100 text-slate-800 flex flex-col items-center justify-center h-screen p-4">
-	<div class="w-full max-w-7xl mx-auto flex flex-col h-full">
-		<header class="text-center mb-4 shrink-0">
-			<h1 class="text-4xl font-bold text-slate-700">Image Jigsaw Puzzle</h1>
-			<p class="text-slate-500 mt-2">Select an image, then assemble the puzzle in the center.</p>
+<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 flex flex-col items-center justify-center h-screen p-4">
+	<!-- expand to full width (remove max-w constraint) -->
+	<div class="w-full mx-auto flex flex-col h-full">
+		<!-- Header with helper text to the right -->
+		<header class="mb-3 shrink-0">
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<h1 class="text-4xl font-bold text-slate-700 dark:text-slate-200">Image Jigsaw Puzzle</h1>
+				<p class="text-slate-800 dark:text-slate-200 text-sm sm:text-base">
+					Select an image, then assemble the puzzle in the center.
+				</p>
+			</div>
 		</header>
 
-		<div class="control-panel mb-4 flex flex-col sm:flex-row items-center justify-center gap-4 shrink-0">
+		<div class="control-panel mb-4 flex flex-col sm:flex-row items-center justify-center gap-4 shrink-0 dark:border dark:border-slate-700">
 			<div class="flex items-center gap-3">
 				<label for="image-loader"
 					class="cursor-pointer bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600 transition-colors">
@@ -171,25 +149,35 @@
 
 			<div class="flex items-center gap-3">
 				<label for="difficulty-select" class="font-medium">Difficulty:</label>
-				<select id="difficulty-select" class="cursor-pointer border rounded px-2 py-1"></select>
+				<select id="difficulty-select" class="cursor-pointer border rounded px-2 py-1 dark:bg-slate-800 dark:border-slate-700"></select>
 			</div>
 
 			<button id="scramble-btn"
 				class="bg-green-500 text-white font-bold py-2 px-4 rounded-md hover:bg-green-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
 				disabled>Scramble</button>
 
+			<!-- Spacer pushes toggles to right on wide screens -->
+			<div class="hidden sm:block sm:ml-auto"></div>
+
+			<!-- Dark mode toggle -->
+			<label class="flex items-center gap-2 text-sm select-none">
+				<input id="dark-mode-toggle" type="checkbox" class="cursor-pointer">
+				<span class="font-medium">Dark</span>
+			</label>
+
 			<!-- UI Debug toggle -->
-			<label class="flex items-center gap-2 text-sm ml-auto select-none">
+			<label class="flex items-center gap-2 text-sm select-none">
 				<input id="ui-debug-toggle" type="checkbox" class="cursor-pointer">
 				<span class="font-medium">Debug</span>
 			</label>
 		</div>
 
+		<!-- Let the board take all remaining space -->
 		<main id="puzzle-board-container"
-			class="flex-grow w-full flex items-center justify-center relative bg-white rounded-lg shadow-md overflow-hidden">
-			<div id="puzzle-board">
-				<p id="board-placeholder" class="text-slate-400 absolute inset-0 flex items-center justify-center">
-					The puzzle board is empty
+			class="flex-grow w-full flex items-center justify-center relative bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
+			<div id="puzzle-board" class="w-full h-full">
+				<p id="board-placeholder" class="text-slate-600 dark:text-slate-300 absolute inset-0 flex items-center justify-center">
+					Use the button in the top-left to select an image.
 				</p>
 				<div id="win-message">
 					<div class="win-message-content">
@@ -227,11 +215,28 @@
 		const imageLoader = document.getElementById('image-loader');
 		const difficultySelect = document.getElementById('difficulty-select');
 		const scrambleBtn = document.getElementById('scramble-btn');
+		scrambleBtn.disabled = true;
 		const puzzleBoard = document.getElementById('puzzle-board');
 		const boardPlaceholder = document.getElementById('board-placeholder');
 		const winMessage = document.getElementById('win-message');
 		const uiDebugToggle = document.getElementById('ui-debug-toggle');
+		const darkToggle = document.getElementById('dark-mode-toggle');
 		uiDebugToggle.checked = false;
+
+		// Initialize dark mode from system or localStorage
+		(function initTheme() {
+			const saved = localStorage.getItem('jigsaw-theme');
+			const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+			const shouldDark = saved ? (saved === 'dark') : prefersDark;
+			document.documentElement.classList.toggle('dark', shouldDark);
+			darkToggle.checked = shouldDark;
+		})();
+
+		darkToggle.addEventListener('change', () => {
+			const enabled = darkToggle.checked;
+			document.documentElement.classList.toggle('dark', enabled);
+			localStorage.setItem('jigsaw-theme', enabled ? 'dark' : 'light');
+		});
 
 		// Debug HUD elements (shown only when debug enabled)
 		const debugHud = document.getElementById('debug-hud');
@@ -241,7 +246,6 @@
 		const debugMetricsEl = document.getElementById('debug-metrics');
 		const toggleBitmap = document.getElementById('toggle-bitmap');
 		const toggleCopy = document.getElementById('toggle-copy');
-		const btnSelfTest = document.getElementById('btn-selftest');
 
 		// Puzzle layout state
 		let assemblyArea = null;
@@ -538,20 +542,20 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 				try {
 					frameSource = new GifFrameSource(file);
 					frameSource.onReady(() => {
-					imageAspectRatio = frameSource.width / frameSource.height;
-					buildDifficultyOptions();
-					scrambleBtn.disabled = false;
+						imageAspectRatio = frameSource.width / frameSource.height;
+						buildDifficultyOptions();
+						scrambleBtn.disabled = false;
 					createPuzzle(); // builds initial pieces from frame 0
 
 					// Every time the GIF advances, rebuild the padded source and repaint pieces.
-					frameSource.onFrame(() => {
-						if (!animRunning || !frameSource?.animated) return;
-						rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
-						repaintAllPiecesFromSlice();
-					});
+						frameSource.onFrame(() => {
+							if (!animRunning || !frameSource?.animated) return;
+							rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
+							repaintAllPiecesFromSlice();
+						});
 
 					startAnimationLoop(); // just flips animRunning=true and lets frame callbacks do the work
-					frameSource.start();
+						frameSource.start();
 					});
 				} catch (err) {
 					log('GIF DECODE ERROR', String(err));
@@ -698,7 +702,6 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 			sliceSourceH = paddedH;
 		}
 
-
 		function attemptDrawTo(ctx, srcDrawable, x, y, w, h, compOp = 'source-over') {
 			ctx.save();
 			ctx.globalCompositeOperation = compOp;
@@ -784,12 +787,12 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 
 			const paddedAspect = sliceSourceW / sliceSourceH;
 
-			// Compute assembly size to be a multiple of the grid (no leftover pixels)
-			let assemblyWidth = Math.floor(containerWidth * 0.5);
+			// Give more space: let assembly take up to 90% of container area
+			let assemblyWidth = Math.floor(containerWidth * 0.7);
 			let assemblyHeight = Math.round(assemblyWidth / paddedAspect);
 
-			if (assemblyHeight > Math.floor(containerHeight * 0.8)) {
-				assemblyHeight = Math.floor(containerHeight * 0.8);
+			if (assemblyHeight > Math.floor(containerHeight * 0.9)) {
+				assemblyHeight = Math.floor(containerHeight * 0.9);
 				assemblyWidth = Math.round(assemblyHeight * paddedAspect);
 			}
 
@@ -864,9 +867,6 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 			const ctx = piece.getContext('2d');
 
 			ctx.clearRect(0, 0, piece.width, piece.height);
-
-			const sx = gridX * sw;
-			const sy = gridY * sh;
 
 			try {
 				ctx.drawImage(
