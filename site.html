@@ -27,13 +27,14 @@
 			position: absolute;
 			cursor: grab;
 			z-index: 10;
-			filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .25));
-			transition: filter .1s, z-index 0s .1s
+			/* Note: we must use box-shadow, not filter: drop-shadow, because that causes issues on Firefox. (Containers with CSS filters cause descendant canvas elements to render wrong.) */
+			box-shadow: 0 2px 4px rgba(0, 0, 0, .25);
+			transition: box-shadow .1s, z-index 0s .1s
 		}
 		.puzzle-group.dragging {
 			cursor: grabbing;
 			z-index: 20;
-			filter: drop-shadow(0 10px 15px rgba(0, 0, 0, .25))
+			box-shadow: 0 10px 15px rgba(0, 0, 0, .25);
 		}
 
 		.puzzle-piece {
@@ -467,7 +468,7 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 				this._canvas = document.createElement('canvas');
 				this._canvas.width = width;
 				this._canvas.height = height;
-				const ctx = this._canvas.getContext('2d');
+				const ctx = this._canvas.getContext('2d', { willReadFrequently: true });
 				ctx.drawImage(source, 0, 0, width, height);
 			}
 			currentFrameCanvas() {
@@ -619,7 +620,7 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 			canvas.width = paddedW;
 			canvas.height = paddedH;
 
-			const ctx = canvas.getContext('2d');
+			const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
 			// Canary magenta background for debug.
 			if (DEBUG_ENABLED) {
@@ -697,7 +698,7 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 				paddedReuseCanvas.height = paddedH;
 			}
 
-			const ctx = paddedReuseCanvas.getContext('2d');
+			const ctx = paddedReuseCanvas.getContext('2d', { willReadFrequently: true });
 			ctx.clearRect(0, 0, paddedW, paddedH);
 
 			const offsetX = Math.floor((paddedW - srcW) / 2);
@@ -778,7 +779,7 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 				if (!paddedReuseCanvas) paddedReuseCanvas = document.createElement('canvas');
 				paddedReuseCanvas.width = padded.width;
 				paddedReuseCanvas.height = padded.height;
-				const ctx = paddedReuseCanvas.getContext('2d');
+				const ctx = paddedReuseCanvas.getContext('2d', { willReadFrequently: true });
 				ctx.clearRect(0, 0, padded.width, padded.height);
 				// Seed from this build’s padded snapshot (current GIF frame)
 				ctx.drawImage(padded.canvas, 0, 0);
@@ -969,7 +970,7 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 		}
 
 		function renderPieceFromCurrentFrame(piece, gridX, gridY, sw, sh) {
-			const ctx = piece.getContext('2d');
+			const ctx = piece.getContext('2d', { willReadFrequently: true });
 
 			ctx.clearRect(0, 0, piece.width, piece.height);
 
