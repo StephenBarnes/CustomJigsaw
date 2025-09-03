@@ -158,7 +158,7 @@
 				<h1 class="text-4xl font-bold text-slate-700 dark:text-slate-200">Custom jigsaw puzzle</h1>
 				<span class="corner-notes text-slate-800 dark:text-slate-200 text-sm sm:text-base">
 					<p>Runs entirely in your browser - your images are not sent to any other computer.</p>
-					<p>Supports animated GIFs! If 3x3 or smaller doesn't work, update your browser.</p>
+					<p>Supports animated GIFs, WEBM, and MP4!</p>
 				</span>
 			</div>
 		</header>
@@ -169,7 +169,7 @@
 					class="cursor-pointer bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600 transition-colors">
 					Select Image
 				</label>
-				<input type="file" id="image-loader" class="hidden" accept="image/png, image/jpeg, image/gif">
+				<input type="file" id="image-loader" class="hidden" accept="image/png, image/jpeg, image/gif, video/webm, video/mp4">
 			</div>
 
 			<div class="flex items-center gap-3">
@@ -494,6 +494,7 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 		--------------------------------
 		StaticImageSource: wraps a single decoded image or ImageBitmap.
 		GifFrameSource: decodes frames & exposes a synced canvas.
+		VideoFrameSource: for WEBM and MP4
 		================================ */
 
 		function fileToDataURL(file) {
@@ -637,6 +638,125 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 			}
 		}
 
+		class VideoFrameSource {
+			constructor(file) {
+				this.ready = false;
+				this.animated = true;
+				this.width = 1;
+				this.height = 1;
+
+				this._canvas = document.createElement('canvas');
+				this._ctx = this._canvas.getContext('2d', { willReadFrequently: true });
+				this._onFrame = () => {};
+				this._onReady = null;
+
+				this._objectURL = URL.createObjectURL(file);
+				this._video = document.createElement('video');
+				this._video.src = this._objectURL;
+				this._video.loop = true;
+				this._video.muted = true;
+				this._video.playsInline = true;
+				this._video.preload = 'auto';
+
+				this._rVFCToken = null;
+				this._playing = false;
+
+				this._video.addEventListener('loadedmetadata', () => {
+				this.width  = Math.max(1, this._video.videoWidth | 0);
+				this.height = Math.max(1, this._video.videoHeight | 0);
+				this._canvas.width = this.width;
+				this._canvas.height = this.height;
+
+				const fireReady = () => {
+					if (this.ready) return;
+					// draw once so the canvas is non-empty
+					this._drawCurrentFrame();
+					this.ready = true;
+					if (this._onReady) this._onReady();
+				};
+
+				// Prefer exact callback for the *first* frame
+				if ('requestVideoFrameCallback' in this._video) {
+					this._video.requestVideoFrameCallback(() => fireReady());
+				} else {
+					// Fallback: first decoded frame
+					const onLoadedData = () => { this._video.removeEventListener('loadeddata', onLoadedData); fireReady(); };
+					this._video.addEventListener('loadeddata', onLoadedData);
+				}
+
+				// Nudge playback so a frame actually becomes available.
+				// (Muted + user gesture from file input generally allows autoplay.)
+				this._video.play().catch(() => {/* ok if blocked; user can hit Scramble */});
+				});
+
+			}
+
+			currentFrameCanvas() { return this._canvas; }
+			sourceElement() { return this._canvas; }
+
+			onReady(cb) { this._onReady = cb; if (this.ready) cb(); }
+			onFrame(cb) { this._onFrame = cb || (() => {}); }
+
+			_drawCurrentFrame() {
+				try {
+					this._ctx.drawImage(this._video, 0, 0, this.width, this.height);
+				} catch {}
+				this._onFrame();
+			}
+
+			// Prefer precise sync when available
+			_scheduleRVFC() {
+				if (!('requestVideoFrameCallback' in this._video)) return false;
+				const tick = () => {
+					if (!this._playing) return;
+					this._drawCurrentFrame();
+					this._rVFCToken = this._video.requestVideoFrameCallback(tick);
+				};
+				this._rVFCToken = this._video.requestVideoFrameCallback(tick);
+				return true;
+			}
+
+			start() {
+				this._playing = true;
+				// Start drawing frames ASAP
+				if (!this._scheduleRVFC()) {
+					// Fallback: draw on 'timeupdate' + a light RAF sampler
+					const onTimeUpdate = () => { if (this._playing) this._drawCurrentFrame(); };
+					this._video.addEventListener('timeupdate', onTimeUpdate);
+					// One extra RAF every tick to catch high-FPS playback
+					const rafLoop = () => {
+						if (!this._playing) return;
+						this._drawCurrentFrame();
+						requestAnimationFrame(rafLoop);
+					};
+					requestAnimationFrame(rafLoop);
+					this._fallbackCleanup = () => {
+						this._video.removeEventListener('timeupdate', onTimeUpdate);
+					};
+				}
+				// Try to play (user gesture from file selection usually allows this)
+				this._video.play().catch(() => {/* ignored; user can click Scramble later */});
+			}
+
+			stop() {
+				this._playing = false;
+				try { this._video.pause(); } catch {}
+				if (this._rVFCToken && 'cancelVideoFrameCallback' in this._video) {
+					try { this._video.cancelVideoFrameCallback(this._rVFCToken); } catch {}
+				}
+				if (this._fallbackCleanup) { try { this._fallbackCleanup(); } catch {} }
+				this._rVFCToken = null;
+			}
+
+			destroy() {
+				this.stop();
+				if (this._objectURL) URL.revokeObjectURL(this._objectURL);
+				this._objectURL = null;
+				this._video.src = '';
+			}
+		}
+
+
 		/* ================================
 		Load & Decode (creates a FrameSource)
 		================================ */
@@ -650,6 +770,34 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 			frameSource = null;
 
 			log('onSelectFile', { name: file.name, size: file.size, type: file.type });
+
+			if (file.type === 'video/webm' || file.type.startsWith('video/')) {
+				try {
+					frameSource = new VideoFrameSource(file);
+					frameSource.onReady(() => {
+						imageAspectRatio = frameSource.width / frameSource.height;
+						buildDifficultyOptions();
+						scrambleBtn.disabled = false;
+
+						createPuzzle(); // build initial pieces from the first video frame
+
+						// Every time the video advances, repaint from the latest frame.
+						frameSource.onFrame(() => {
+							if (!animRunning || !frameSource?.animated) return;
+							rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
+							repaintAllPiecesFromSlice();
+						});
+
+						startAnimationLoop(); // flip animRunning=true (same as GIF path)
+						frameSource.start();
+					});
+				} catch (err) {
+					log('VIDEO DECODE ERROR', String(err));
+					alert('Failed to decode video.');
+					return;
+				}
+				return; // handled as video path
+			}
 
 			if (file.type === 'image/gif') {
 				try {
