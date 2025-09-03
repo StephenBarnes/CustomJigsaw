@@ -256,8 +256,8 @@
 		const darkToggle = document.getElementById('dark-mode-toggle');
 		uiDebugToggle.checked = false;
 		const audioControls = document.getElementById('audio-controls');
-		const audioToggle   = document.getElementById('audio-toggle');
-		const audioVolume   = document.getElementById('audio-volume');
+		const audioToggle = document.getElementById('audio-toggle');
+		const audioVolume = document.getElementById('audio-volume');
 
 		// Initialize dark mode from system or localStorage
 		(function initTheme() {
@@ -681,7 +681,7 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 				this._video.playsInline = true;
 				this._video.preload = 'auto';
 
-				this._video.muted = true; // muted until user opts in
+				this._video.muted = !audioToggle.checked; // audio off by default, but persists between videos
 				this._hasAudio = false;
 				this._onAudioStatus = () => {};
 
@@ -867,9 +867,7 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 						frameSource.onAudioStatus(updateAudioUI);
 						updateAudioUI(); // in case it’s already known
 
-						audioToggle.checked = false; // start silent
-						audioVolume.value = '0.8';
-						frameSource.setMuted(true);
+						frameSource.setMuted(!audioToggle.checked);
 						frameSource.setVolume(parseFloat(audioVolume.value));
 
 						startAnimationLoop();
