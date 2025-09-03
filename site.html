@@ -940,6 +940,7 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 			// 5) If the puzzle is already solved, re-center the final group into the new assembly rect
 			if (puzzleSolved && pieceGroups.length === 1) {
 				const finalGroup = pieceGroups[0];
+				finalGroup.element.style.transition = 'left .25s, top .25s';
 				const finalX = assemblyX - (finalGroup.minX * pieceWidth);
 				const finalY = assemblyY - (finalGroup.minY * pieceHeight);
 				finalGroup.element.style.left = `${finalX | 0}px`;
