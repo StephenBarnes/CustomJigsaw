@@ -198,6 +198,7 @@
 		<h3>Debug</h3>
 		<div id="debug-controls">
 			<label class="text-xs opacity-80"><input id="toggle-bitmap" type="checkbox"> use ImageBitmap</label>
+			<label class="text-xs opacity-80"><input id="toggle-copy" type="checkbox" checked> composite=copy</label>
 		</div>
 		<pre id="debug-env"></pre>
 		<pre id="debug-log"></pre>
@@ -214,6 +215,7 @@
 
 		let DEBUG_ENABLED = false;            // UI toggle
 		let USE_BITMAP = false;               // toggled in HUD
+		let USE_COMPOSITE_COPY = true;        // toggled in HUD
 
 		const imageLoader = document.getElementById('image-loader');
 		const difficultySelect = document.getElementById('difficulty-select');
@@ -248,6 +250,7 @@
 		const debugPaddedCanvas = document.getElementById('debug-padded');
 		const debugMetricsEl = document.getElementById('debug-metrics');
 		const toggleBitmap = document.getElementById('toggle-bitmap');
+		const toggleCopy = document.getElementById('toggle-copy');
 
 		// Puzzle layout state
 		let assemblyArea = null;
@@ -364,6 +367,8 @@
 			debugHud.style.display = visible ? 'block' : 'none';
 			if (visible) {
 				toggleBitmap.checked = USE_BITMAP;
+				toggleCopy.checked = USE_COMPOSITE_COPY;
+
 				debugEnv.textContent =
 `UA: ${navigator.userAgent}
 createImageBitmap: ${!!window.createImageBitmap}
@@ -417,6 +422,11 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 			USE_BITMAP = toggleBitmap.checked;
 			log('TOGGLE USE_BITMAP', USE_BITMAP);
 			if (srcFile) loadFromFile(srcFile);
+		});
+		toggleCopy.addEventListener('change', () => {
+			USE_COMPOSITE_COPY = toggleCopy.checked;
+			log('TOGGLE composite=copy', USE_COMPOSITE_COPY);
+			if (frameSource?.ready) createPuzzle();
 		});
 
 		/* ================================
@@ -476,8 +486,7 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 				this.animated = true;
 				this.width = 1;
 				this.height = 1;
-				this._canvas = document.createElement('canvas'); // gifler draws here
-				this._snapshot = document.createElement('canvas'); // we read from this
+				this._canvas = document.createElement('canvas');
 				this._animator = null;
 				this._onFrame = () => {};
 				this._objectURL = URL.createObjectURL(file);
@@ -486,50 +495,29 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 				gifler(this._objectURL).get((animator) => {
 					this._animator = animator;
 
+					// Draw each frame into our private canvas and notify listeners.
 					animator.onDrawFrame = (ctx, frame) => {
 						// Do not clear the ctx. Gifler has already applied the correct disposal.
-						// Ensure a clean start at frame 0 across engines.
-						if (frame.index === 0) {
-							ctx.save();
-							ctx.globalCompositeOperation = 'source-over';
-							ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
-							ctx.restore();
-						}
-
-						// Draw the patch for this frame.
+						// Draw the frame patch at its intended position.
 						ctx.globalCompositeOperation = 'source-over';
 						const x = ('x' in frame) ? frame.x : (frame.dims?.left || 0);
-						const y = ('y' in frame) ? frame.y : (frame.dims?.top || 0);
+						const y = ('y' in frame) ? frame.y : (frame.dims?.top  || 0);
 						ctx.drawImage(frame.buffer, x, y);
-
-						// Double buffer: copy full composed frame into a stable snapshot.
-						if (this._snapshot.width !== this._canvas.width ||
-							this._snapshot.height !== this._canvas.height) {
-							this._snapshot.width = this._canvas.width;
-							this._snapshot.height = this._canvas.height;
-						}
-						const sctx = this._snapshot.getContext('2d');
-						sctx.clearRect(0, 0, this._snapshot.width, this._snapshot.height);
-						sctx.drawImage(this._canvas, 0, 0);
-
-						this._onFrame(); // notify after snapshot is ready
+						this._onFrame();
 					};
 
 					// Prepare canvas, set dimensions from GIF.
 					animator.animateInCanvas(this._canvas, /* setDimensions */ true);
 					this.width  = this._canvas.width;
 					this.height = this._canvas.height;
-					this._snapshot.width  = this.width;
-					this._snapshot.height = this.height;
 
 					this.ready = true;
 					if (this._onReady) this._onReady();
 				});
 			}
 
-			// Always expose the stable snapshot, never the live drawing surface.
-			currentFrameCanvas() { return this._snapshot; }
-			sourceElement() { return this._snapshot; }
+			currentFrameCanvas() { return this._canvas; }
+			sourceElement() { return this._canvas; } // kept for parity with StaticImageSource
 
 			onReady(cb) { this._onReady = cb; if (this.ready) cb(); }
 			onFrame(cb) { this._onFrame = cb || (() => {}); }
@@ -642,12 +630,11 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 			const offsetX = Math.floor((paddedW - srcW) / 2);
 			const offsetY = Math.floor((paddedH - srcH) / 2);
 
-			// Simple, robust path: clear + source-over draw at integer coords.
-			ctx.save();
-			ctx.globalCompositeOperation = 'source-over';
-			ctx.clearRect(0, 0, paddedW, paddedH);
-			ctx.drawImage(srcEl, offsetX | 0, offsetY | 0, srcW | 0, srcH | 0);
-			ctx.restore();
+			let drew = attemptDrawTo(ctx, srcEl, offsetX, offsetY, srcW, srcH, 'source-over');
+
+			if (!drew && USE_COMPOSITE_COPY) {
+				drew = attemptDrawTo(ctx, srcEl, offsetX, offsetY, srcW, srcH, 'copy');
+			}
 
 			// Crosshair (debug)
 			if (DEBUG_ENABLED) {
@@ -688,6 +675,7 @@ Grid: ${gridX}×${gridY}
 Piece: ${(paddedW / gridX) | 0}×${(paddedH / gridY) | 0}
 Samples: TL a=${aTL} MID a=${aMid} sum=${aTL + aMid}
 Path: ${frameSource.animated ? 'Animated' : 'Static'}
+DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 `;
 			}
 
@@ -714,11 +702,36 @@ Path: ${frameSource.animated ? 'Animated' : 'Static'}
 
 			const offsetX = Math.floor((paddedW - srcW) / 2);
 			const offsetY = Math.floor((paddedH - srcH) / 2);
-			ctx.drawImage(srcEl, offsetX|0, offsetY|0, srcW|0, srcH|0);
+			ctx.drawImage(srcEl, offsetX, offsetY, srcW, srcH);
 
 			sliceSourceCanvas = paddedReuseCanvas;
 			sliceSourceW = paddedW;
 			sliceSourceH = paddedH;
+		}
+
+		function attemptDrawTo(ctx, srcDrawable, x, y, w, h, compOp = 'source-over') {
+			ctx.save();
+			ctx.globalCompositeOperation = compOp;
+			ctx.clearRect(x, y, w, h);
+			let drew = false;
+
+			try {
+				ctx.drawImage(srcDrawable, x, y, w, h);
+			} catch (err) {
+				log('attemptDrawTo ERROR', { compOp, err: String(err) });
+			}
+
+			try {
+				const mid = ctx.getImageData((x + (w / 2))|0, (y + (h / 2))|0, 1, 1).data;
+				drew = mid[3] > 0;
+			} catch (err) {
+				log('probe ERROR', String(err));
+			}
+
+			ctx.restore();
+
+			log('attemptDrawTo', { compOp, drew });
+			return drew;
 		}
 
 		/* ================================
