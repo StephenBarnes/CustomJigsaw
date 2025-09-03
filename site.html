@@ -58,6 +58,25 @@
 		:root.dark #assembly-area { border-color: #334155 }
 		:root.dark .win-message-content { background: #166534 }
 
+		/* --- Merge feedback (sound is JS; this is the visual) --- */
+		/* A temporary overlay sized to the merged group's bounding box. */
+		.merge-highlight {
+			position: absolute;
+			left: 0; top: 0;
+			pointer-events: none;
+			border-radius: .375rem;
+			outline: 2px solid rgba(99,102,241,0); /* indigo-ish outline */
+			z-index: 1; /* above pieces, inside group */
+		}
+		.merge-highlight.run {
+			animation: mhFlash .35s ease-out forwards;
+		}
+		@keyframes mhFlash {
+			0%   { outline-color: rgba(99,102,241,.95); box-shadow: 0 0 0 4px rgba(99,102,241,.18) }
+			70%  { outline-color: rgba(99,102,241,.35); box-shadow: 0 0 0 8px rgba(99,102,241,.12) }
+			100% { outline-color: rgba(99,102,241,0);   box-shadow: none }
+		}
+
 		#assembly-area {
 			position: absolute;
 			border: 2px dashed #cbd5e1;
@@ -264,7 +283,47 @@
 		let puzzleSolved = false;
 		let buildToken = 0;
 
-		const SNAP_TOLERANCE = 25;
+		const SNAP_TOLERANCE = 30;
+
+		/* Click SFX (plays on merge). We clone for overlapping plays. */
+		const CLICK_VOLUME = 0.15;
+		const clickAudio = new Audio('./assets/click.mp3');
+		clickAudio.preload = 'auto';
+		clickAudio.volume = CLICK_VOLUME;
+
+		function playClick() {
+			try {
+				// Clone to allow rapid consecutive merges to overlap.
+				const a = clickAudio.cloneNode();
+				a.volume = CLICK_VOLUME;
+				// Play is user-gesture unlocked because it happens after a drag.
+				a.play().catch(() => {});
+				setTimeout(() => { try { a.remove(); } catch {} }, 4000);
+			} catch {}
+		}
+
+		/* Visual overlay that sweeps diagonally across the newly merged group. */
+		function runMergeHighlight(group) {
+			// Remove any previous highlight still hanging around (e.g., mid-animation)
+			try {
+				group.element.querySelectorAll('.merge-highlight').forEach(n => n.remove());
+			} catch {}
+			// Size to group's occupied grid area
+			const w = Math.max(1, group.widthInPieces * pieceWidth);
+			const h = Math.max(1, group.heightInPieces * pieceHeight);
+			const overlay = document.createElement('div');
+			overlay.className = 'merge-highlight';
+			overlay.style.width = `${w}px`;
+			overlay.style.height = `${h}px`;
+			group.element.appendChild(overlay);
+			// kick off animations
+			// (force reflow so class change triggers keyframes in all browsers)
+			void overlay.offsetHeight;
+			overlay.classList.add('run');
+			overlay.addEventListener('animationend', () => {
+				try { overlay.remove(); } catch {}
+			}, { once: true });
+		}
 
 		// Source decoding / rendering state
 		let srcFile = null;
@@ -1046,6 +1105,7 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 			const sh = sliceSourceH / puzzleSizeY;
 			for (const group of pieceGroups) {
 				for (const piece of group.pieces) {
+					if (!piece || typeof piece.getContext !== 'function') continue;
 					const gx = parseInt(piece.dataset.correctX, 10);
 					const gy = parseInt(piece.dataset.correctY, 10);
 					renderPieceFromCurrentFrame(piece, gx, gy, sw, sh);
@@ -1205,6 +1265,7 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 		function checkForMultiSnap(draggedGroup) {
 			let groupToCheck = draggedGroup;
 			let madeAMerge = true;
+			let mergedAny = false;
 
 			while (madeAMerge) {
 				madeAMerge = false;
@@ -1216,10 +1277,16 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 					const snapResult = findAndPerformSnap(groupToCheck, stationaryGroup);
 					if (snapResult) {
 						groupToCheck = stationaryGroup;
+						mergedAny = true;
 						madeAMerge = true;
 						break;
 					}
 				}
+			}
+			// One-time feedback after all chained merges are complete.
+			if (mergedAny) {
+				playClick();
+				runMergeHighlight(groupToCheck);
 			}
 		}
 
@@ -1304,11 +1371,22 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 			const offsetY = dEl.offsetTop - sEl.offsetTop;
 
 			while (dEl.firstChild) {
-				const piece = dEl.firstChild;
-				piece.style.left = `${(parseFloat(piece.style.left) + offsetX) | 0}px`;
-				piece.style.top = `${(parseFloat(piece.style.top) + offsetY) | 0}px`;
-				sEl.appendChild(piece);
-				sg.pieces.push(piece);
+				const node = dEl.firstChild;
+				// If this is a transient visual overlay, just drop it.
+				if (node.nodeType === 1 && node.classList && node.classList.contains('merge-highlight')) {
+					node.remove();
+					continue;
+				}
+				// Move node into sg
+				if (node.style) {
+					node.style.left = `${(parseFloat(node.style.left || '0') + offsetX) | 0}px`;
+					node.style.top = `${(parseFloat(node.style.top || '0') + offsetY) | 0}px`;
+				}
+				sEl.appendChild(node);
+				// Only canvases are puzzle pieces
+				if (node.tagName === 'CANVAS') {
+					sg.pieces.push(node);
+				}
 			}
 
 			let minX = Infinity, minY = Infinity;
