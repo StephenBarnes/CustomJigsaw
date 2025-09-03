@@ -487,30 +487,75 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 				this.animated = true;
 				this.width = 1;
 				this.height = 1;
+
 				this._canvas = document.createElement('canvas');
+				this._ctx = this._canvas.getContext('2d', { willReadFrequently: true });
 				this._animator = null;
-				this._onFrame = () => {};
+				this._onFrame = () => { };
+				this._onReady = null;
 				this._objectURL = URL.createObjectURL(file);
 
-				// Build animator, but don't start yet.
+				// For disposal handling
+				this._prevRect = null;           // {x,y,w,h}
+				this._prevDisposal = 0;          // 0/1/2/3
+				this._snapshot = null;           // ImageData for dispose=3
+
 				gifler(this._objectURL).get((animator) => {
 					this._animator = animator;
 
-					// Draw each frame into our private canvas and notify listeners.
-					animator.onDrawFrame = (ctx, frame) => {
-						// Do not clear the ctx. Gifler has already applied the correct disposal.
-						// Draw the frame patch at its intended position.
-						ctx.globalCompositeOperation = 'source-over';
+					// Let gifler size our canvas to GIF logical screen
+					animator.animateInCanvas(this._canvas, /* setDimensions */ true);
+					this.width = this._canvas.width;
+					this.height = this._canvas.height;
+
+					// We manage compositing ourselves for cross-browser correctness.
+					animator.onDrawFrame = (_ctxFromGifler, frame) => {
 						const x = ('x' in frame) ? frame.x : (frame.dims?.left || 0);
-						const y = ('y' in frame) ? frame.y : (frame.dims?.top  || 0);
-						ctx.drawImage(frame.buffer, x, y);
+						const y = ('y' in frame) ? frame.y : (frame.dims?.top || 0);
+						const w = ('width' in frame) ? frame.width : (frame.dims?.width || frame.buffer?.width || 0);
+						const h = ('height' in frame) ? frame.height : (frame.dims?.height || frame.buffer?.height || 0);
+						const disposal = (typeof frame.disposalType === 'number') ? frame.disposalType : 0;
+
+						// Apply disposal of the *previous* frame
+						if (this._prevRect) {
+							if (this._prevDisposal === 2) {
+								// Restore to background: clear the previous rect
+								this._ctx.clearRect(this._prevRect.x, this._prevRect.y, this._prevRect.w, this._prevRect.h);
+							} else if (this._prevDisposal === 3 && this._snapshot) {
+								// Restore to previous: put back the snapshot
+								try {
+									this._ctx.putImageData(this._snapshot, 0, 0);
+								} catch { }
+							}
+						}
+
+						// If the upcoming frame asks for "restore to previous", take a snapshot now.
+						// (Most encoders use this sparingly; snapshot once per frame is OK for our sizes.)
+						this._snapshot = null;
+						if (disposal === 3) {
+							try {
+								this._snapshot = this._ctx.getImageData(0, 0, this.width, this.height);
+							} catch {
+								this._snapshot = null;
+							}
+						}
+
+						// Draw the current patch
+						this._ctx.globalCompositeOperation = 'source-over';
+						try {
+							this._ctx.drawImage(frame.buffer, x, y);
+						} catch (e) {
+							// Extremely old Firefox builds had stricter types for drawImage;
+							// no-op here to avoid crashing the loop.
+						}
+
+						// Record disposal info for next tick
+						this._prevRect = { x, y, w, h };
+						this._prevDisposal = disposal | 0;
+
+						// Notify listeners
 						this._onFrame();
 					};
-
-					// Prepare canvas, set dimensions from GIF.
-					animator.animateInCanvas(this._canvas, /* setDimensions */ true);
-					this.width  = this._canvas.width;
-					this.height = this._canvas.height;
 
 					this.ready = true;
 					if (this._onReady) this._onReady();
@@ -518,16 +563,17 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 			}
 
 			currentFrameCanvas() { return this._canvas; }
-			sourceElement() { return this._canvas; } // kept for parity with StaticImageSource
+			sourceElement() { return this._canvas; }
 
 			onReady(cb) { this._onReady = cb; if (this.ready) cb(); }
-			onFrame(cb) { this._onFrame = cb || (() => {}); }
+			onFrame(cb) { this._onFrame = cb || (() => { }); }
 
 			start() { if (this._animator) this._animator.start(); }
-			stop()  { if (this._animator) this._animator.stop(); }
+			stop() { if (this._animator) this._animator.stop(); }
 
 			destroy() {
-				try { this.stop(); } catch {}
+				try { this.stop(); } catch { }
+				this._snapshot = null;
 				if (this._objectURL) URL.revokeObjectURL(this._objectURL);
 			}
 		}
