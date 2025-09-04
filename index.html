@@ -19,17 +19,65 @@
 		html, body { height: 100%; }
 		body {
 			font-family: 'Inter', sans-serif;
-			touch-action: none;
-			overflow: hidden
+			touch-action: manipulation;
+			overflow: auto;
 		}
 
+		/* Collapsible top panel (using <details>) */
+		.top-panel {
+			position: sticky;
+			top: 0;
+			z-index: 40;
+			border-radius: .75rem;
+		}
+
+		/* Summary bar that stays visible when collapsed */
+		.top-summary {
+			background: #fff;
+			border-radius: .75rem;
+			padding: .5rem .75rem;
+			box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -2px rgba(0,0,0,.05);
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: .75rem;
+			cursor: pointer;
+		}
+		:root.dark .top-summary {
+			background: #0f172a;
+			box-shadow: 0 10px 15px -3px rgba(0,0,0,.5), 0 4px 6px -2px rgba(0,0,0,.4);
+		}
+
+		/* Summary chevron (uses the built-in marker on most browsers) */
+		.top-summary::-webkit-details-marker { display: none; }
+		.top-summary .chev {
+			display: inline-block;
+			transition: transform .2s ease;
+		}
+		.top-panel[open] .chev { transform: rotate(180deg); }
+
+		/* Keep the control panel visually grouped under the summary */
+		.top-panel .control-panel { margin-top: .5rem; }
+
+		/* Hide the helper corner notes on narrow screens (space saving) */
+		@media (max-width: 640px) {
+			.corner-notes { display: none !important; }
+		}
+
+		/* Respect users who prefer less motion */
+		@media (prefers-reduced-motion: reduce) {
+			.top-summary .chev { transition: none; }
+		}
+
+		/* Group of puzzle pieces */
 		.puzzle-group {
 			position: absolute;
 			cursor: grab;
 			z-index: 10;
 			/* Note: we must use box-shadow, not filter: drop-shadow, because that causes issues on Firefox. (Containers with CSS filters cause descendant canvas elements to render wrong.) */
 			box-shadow: 0 2px 4px rgba(0, 0, 0, .25);
-			transition: box-shadow .1s, z-index 0s .1s
+			transition: box-shadow .1s, z-index 0s .1s;
+			touch-action: none;
 		}
 		.puzzle-group.dragging {
 			cursor: grabbing;
@@ -150,60 +198,72 @@
 </head>
 
 <body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 flex flex-col items-center justify-center h-screen p-4">
-	<!-- expand to full width (remove max-w constraint) -->
 	<div class="w-full mx-auto flex flex-col h-full">
-		<!-- Header with helper text to the right -->
-		<header class="mb-3 shrink-0">
-			<div class="flex flex-wrap items-center justify-between gap-2">
-				<h1 class="text-4xl font-bold text-slate-700 dark:text-slate-200">Custom jigsaw puzzle</h1>
-				<span class="corner-notes text-slate-800 dark:text-slate-200 text-sm sm:text-base">
-					<p>Runs entirely in your browser - your images are not sent to any other computer.</p>
-					<p>Supports animated GIFs, WEBM, and MP4!</p>
-				</span>
+		<!-- Collapsible Top Panel -->
+		<details id="top-panel" class="top-panel w-full mb-3 shrink-0" open>
+			<!-- Header -->
+			<summary class="top-summary select-none">
+				<div class="flex items-center gap-2">
+					<h1 class="text-l sm:text-l font-bold text-slate-700 dark:text-slate-200">Custom jigsaw puzzle</h1>
+					<div class="hidden sm:block sm:ml-auto"></div>
+					<span class="corner-notes text-slate-800 dark:text-slate-200 text-sm sm:text-base">
+						<span class="hidden sm:inline">Runs entirely in your browser - your images are not sent to any other computer. </span>
+						<span class="hidden sm:inline">Supports animated GIFs, WEBM, and MP4!</span>
+					</span>
+				</div>
+				<span class="chev text-slate-600 dark:text-slate-300" aria-hidden="true">▾</span>
+			</summary>
+
+			<div class="control-panel mb-4 flex flex-col sm:flex-row items-center justify-center gap-4 shrink-0 dark:border dark:border-slate-700">
+				<!-- Two-row layout on mobile; single row on desktop -->
+				<div class="grid grid-cols-1 gap-3 sm:flex sm:flex-row sm:items-center sm:justify-center">
+					<!-- Top row (primary controls) -->
+					<div class="flex items-center gap-3 flex-wrap">
+						<div class="flex items-center gap-3">
+							<label for="image-loader"
+								class="cursor-pointer bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600 transition-colors">
+								Select Image
+							</label>
+							<input type="file" id="image-loader" class="hidden"
+								accept="image/png, image/jpeg, image/gif, video/webm, video/mp4">
+						</div>
+
+						<div class="flex items-center gap-3">
+							<label for="difficulty-select" class="font-medium">Difficulty:</label>
+							<select id="difficulty-select"
+								class="cursor-pointer border rounded px-2 py-1 dark:bg-slate-800 dark:border-slate-700"></select>
+						</div>
+
+						<button id="scramble-btn"
+							class="bg-green-500 text-white font-bold py-2 px-4 rounded-md hover:bg-green-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+							disabled>Scramble</button>
+					</div>
+
+					<!-- Thin divider only on narrow screens -->
+					<div class="h-px bg-slate-200 dark:bg-slate-700 sm:hidden"></div>
+
+					<!-- Bottom row (secondary controls) -->
+					<div class="flex items-center gap-4 flex-wrap sm:ml-auto">
+						<label class="flex items-center gap-2 text-sm select-none">
+							<input id="dark-mode-toggle" type="checkbox" class="cursor-pointer">
+							<span class="font-medium">Dark</span>
+						</label>
+
+						<!-- Shown only when a video with audio is loaded -->
+						<label id="audio-controls" class="flex items-center gap-2 text-sm select-none" style="display:none">
+							<input id="audio-toggle" type="checkbox" class="cursor-pointer">
+							<span class="font-medium">Audio</span>
+							<input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.8" class="w-24">
+						</label>
+
+						<label class="flex items-center gap-2 text-sm select-none">
+							<input id="ui-debug-toggle" type="checkbox" class="cursor-pointer">
+							<span class="font-medium">Debug</span>
+						</label>
+					</div>
+				</div>
 			</div>
-		</header>
-
-		<div class="control-panel mb-4 flex flex-col sm:flex-row items-center justify-center gap-4 shrink-0 dark:border dark:border-slate-700">
-			<div class="flex items-center gap-3">
-				<label for="image-loader"
-					class="cursor-pointer bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600 transition-colors">
-					Select Image
-				</label>
-				<input type="file" id="image-loader" class="hidden" accept="image/png, image/jpeg, image/gif, video/webm, video/mp4">
-			</div>
-
-			<div class="flex items-center gap-3">
-				<label for="difficulty-select" class="font-medium">Difficulty:</label>
-				<select id="difficulty-select" class="cursor-pointer border rounded px-2 py-1 dark:bg-slate-800 dark:border-slate-700"></select>
-			</div>
-
-			<button id="scramble-btn"
-				class="bg-green-500 text-white font-bold py-2 px-4 rounded-md hover:bg-green-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-				disabled>Scramble</button>
-
-			<!-- Spacer pushes toggles to right on wide screens -->
-			<div class="hidden sm:block sm:ml-auto"></div>
-
-			<!-- Dark mode toggle -->
-			<label class="flex items-center gap-2 text-sm select-none">
-				<input id="dark-mode-toggle" type="checkbox" class="cursor-pointer">
-				<span class="font-medium">Dark</span>
-			</label>
-
-			<!-- Audio controls (only shown when a video with audio is loaded) -->
-			<label id="audio-controls" class="flex items-center gap-2 text-sm select-none" style="display:none">
-				<input id="audio-toggle" type="checkbox" class="cursor-pointer">
-				<span class="font-medium">Audio</span>
-				<input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.8" class="w-24">
-			</label>
-
-
-			<!-- UI Debug toggle -->
-			<label class="flex items-center gap-2 text-sm select-none">
-				<input id="ui-debug-toggle" type="checkbox" class="cursor-pointer">
-				<span class="font-medium">Debug</span>
-			</label>
-		</div>
+		</details>
 
 		<!-- Let the board take all remaining space -->
 		<main id="puzzle-board-container"
@@ -258,6 +318,32 @@
 		const audioControls = document.getElementById('audio-controls');
 		const audioToggle = document.getElementById('audio-toggle');
 		const audioVolume = document.getElementById('audio-volume');
+		const topPanel = document.getElementById('top-panel');
+
+		// Handle collapsing top bar
+		// Persist user choice (especially on desktop)
+		(function initTopPanelOpen() {
+			const saved = localStorage.getItem('jigsaw-top-open');
+			if (saved === 'true' || saved === 'false') {
+				topPanel.open = (saved === 'true');
+			}
+		})();
+		// Reflow puzzle when panel opens/closes so the board resizes cleanly
+		topPanel.addEventListener('toggle', () => {
+			try { relayoutPuzzlePreserveGroups(); } catch {}
+			localStorage.setItem('jigsaw-top-open', topPanel.open ? 'true' : 'false');
+		});
+		// Helper to collapse on small screens
+		function isMobileNarrow() {
+			return window.matchMedia('(max-width: 640px)').matches;
+		}
+		function collapseTopPanelForMobile() {
+			if (isMobileNarrow()) {
+				topPanel.open = false;
+				// Let the DOM settle, then relayout
+				setTimeout(() => { try { relayoutPuzzlePreserveGroups(); } catch {} }, 0);
+			}
+		}
 
 		// Initialize dark mode from system or localStorage
 		(function initTheme() {
@@ -474,6 +560,7 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 			if (!file) return;
 			srcFile = file;
 			loadFromFile(file);
+			collapseTopPanelForMobile(); // Auto-collapse only on mobile after a selection
 		});
 
 		difficultySelect.addEventListener('change', () => {
@@ -497,6 +584,12 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 				buildDifficultyOptions();           // keep dropdown labels up to date
 				relayoutPuzzlePreserveGroups();     // <— new function (see below)
 			});
+		});
+
+		// If we cross the sm breakpoint, re-layout once
+		const mm = window.matchMedia('(max-width: 640px)');
+		mm.addEventListener?.('change', () => {
+			try { relayoutPuzzlePreserveGroups(); } catch {}
 		});
 
 		/* ================================
@@ -1131,7 +1224,7 @@ DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 			const paddedAspect = sliceSourceW / sliceSourceH;
 
 			// Give more space: let assembly take up to 90% of container area
-			let assemblyWidth = Math.floor(containerWidth * 0.7);
+			let assemblyWidth = Math.floor(containerWidth * (isMobileNarrow?.() ? 0.92 : 0.7));
 			let assemblyHeight = Math.round(assemblyWidth / paddedAspect);
 
 			if (assemblyHeight > Math.floor(containerHeight * 0.9)) {
