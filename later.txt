@@ -18,7 +18,3 @@ You can save this webpage and use it offline.
 Supports animated GIFs!
 (If 3x3 or smaller doesn't work, update your browser.)
 (If pictures or GIFs aren't rendering correctly, try running it in Chromium instead of Firefox. Firefox seems to be rendering GIFs wrong, with static appearing on later frames.)
-
-Next:
-Upload to github, set up Github Pages, try using it with phone.
-Add some kind of animation and sound when pieces snap together.
