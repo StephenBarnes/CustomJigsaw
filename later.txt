@@ -1,3 +1,17 @@
+========================================================================
+Prompt template:
+
+I made a single-page static site that lets the user pick an image file from their computer, then makes a jigsaw puzzle with roughly-square pieces for the user to assemble. Currently supports PNGs and JPGs as well as animated GIFs, WEBM, and MP4 - the pieces are animated in sync, and it supports audio if included in the video file.
+
+Now I want to add ...
+
+Can you help me make these changes? The code is below. Please tell me what code blocks to change or insert - no need to reproduce the entire source code is your response. Code:
+
+Code:
+```
+```
+========================================================================
+
 I want to add a feature to this that lets you give people a URL with an image link and difficulty.
 So for example I find the image link "https://upload.wikimedia.org/wikipedia/commons/0/0b/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg". And suppose this static puzzle site is hosted at `github.io/puzzle.html`. I want there to be a button on my site called "share puzzle" that opens a box for the user to paste a URL for the image. Then it gives them a link like `github.io/puzzle.html?image=https..." with the link to the image, and they can share that with other people, and clicking on it makes this site automatically load the image at that URL.
 Is this possible, or will we have issues with CORS requests or something? If possible, please try to implement it. For now, make this webpage load image links given in that way. Later I'll work on adding the button and textbox on this page.

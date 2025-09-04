@@ -157,7 +157,7 @@
 			display: flex;
 			justify-content: center;
 			background: linear-gradient(to top, rgba(0, 0, 0, .6), transparent);
-			padding: 2rem 1rem;
+			padding: 0.5rem 0.3rem;
 			box-sizing: border-box;
 			opacity: 0;
 			transform: translateY(100%);
@@ -169,7 +169,7 @@
 
 		.win-message-content {
 			text-align: center;
-			padding: 1.5rem 3rem;
+			padding: 0.5rem 1rem;
 			background: #2f855a;
 			border-radius: .75rem;
 			box-shadow: 0 10px 25px rgba(0, 0, 0, .3)
@@ -276,12 +276,20 @@
 			class="flex-grow w-full flex items-center justify-center relative bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
 			<div id="puzzle-board" class="w-full h-full">
 				<p id="board-placeholder" class="text-slate-600 dark:text-slate-300 absolute inset-0 flex items-center justify-center">
-					Use the button in the top-left to select an image.
+					Drop a file here (GIF, WEBM, MP4, PNG, or JPG), or click the button in the top-left.
 				</p>
 				<div id="win-message">
 					<div class="win-message-content">
 						<h2>Puzzle solved!</h2>
 					</div>
+				</div>
+			</div>
+			<!-- Drop overlay (shown only while dragging files over the page) -->
+			<div id="drop-overlay"
+				class="hidden absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm pointer-events-none">
+				<div
+					class="pointer-events-none border-2 border-dashed rounded-xl px-6 py-4 font-semibold text-white dark:text-slate-100 bg-slate-950/20">
+					Drop image / GIF / WEBM / MP4 to start
 				</div>
 			</div>
 		</main>
@@ -596,6 +604,75 @@ getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 		const mm = window.matchMedia('(max-width: 640px)');
 		mm.addEventListener?.('change', () => {
 			try { relayoutPuzzlePreserveGroups(); } catch {}
+		});
+
+		/* ================================
+		Drag & Drop: behave like the Select Image button
+		================================ */
+		const dropOverlay = document.getElementById('drop-overlay');
+		let dragDepth = 0;
+
+		function showDropOverlay() { try { dropOverlay.classList.remove('hidden'); } catch { } }
+		function hideDropOverlay() { try { dropOverlay.classList.add('hidden'); } catch { } }
+
+		function hasFiles(e) {
+			const dt = e.dataTransfer;
+			if (!dt) return false;
+			// Safari sometimes lacks 'Files' in types; fall back to files length.
+			return (Array.from(dt.types || []).includes('Files')) || (dt.files && dt.files.length > 0);
+		}
+
+		function isSupportedFile(file) {
+			if (!file) return false;
+			const t = (file.type || '').toLowerCase();
+			if (/^image\/(png|jpeg|gif)$/.test(t)) return true;
+			if (/^video\/(mp4|webm)$/.test(t)) return true;
+			// Fallback by extension (some browsers omit type for dragged files)
+			const n = (file.name || '').toLowerCase();
+			return /\.(png|jpe?g|gif|mp4|webm)$/.test(n);
+		}
+
+		function pickFirstSupported(dt) {
+			const files = Array.from(dt.files || []);
+			return files.find(isSupportedFile) || null;
+		}
+
+		// Allow dropping anywhere on the document without navigating away
+		document.addEventListener('dragover', (e) => {
+			if (!hasFiles(e)) return;
+			e.preventDefault(); // critical: enables drop
+		});
+
+		document.addEventListener('dragenter', (e) => {
+			if (!hasFiles(e)) return;
+			e.preventDefault();
+			dragDepth++;
+			showDropOverlay();
+		});
+
+		document.addEventListener('dragleave', (e) => {
+			if (!hasFiles(e)) return;
+			// Track nested enter/leave events so we only hide when truly leaving the page
+			dragDepth = Math.max(0, dragDepth - 1);
+			if (dragDepth === 0) hideDropOverlay();
+		});
+
+		document.addEventListener('drop', (e) => {
+			if (!hasFiles(e)) return;
+			e.preventDefault();
+			dragDepth = 0;
+			hideDropOverlay();
+
+			const file = pickFirstSupported(e.dataTransfer);
+			if (!file) {
+				alert('Unsupported file type.\nPlease use PNG, JPG, GIF, WEBM, or MP4.');
+				return;
+			}
+
+			srcFile = file;
+			loadFromFile(file);
+			// Match the behavior of the file picker on mobile
+			try { if (isMobileNarrow()) collapseTopPanelForMobile(); } catch { }
 		});
 
 		/* ================================
