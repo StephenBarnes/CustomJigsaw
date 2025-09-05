@@ -22,6 +22,8 @@
 			touch-action: manipulation;
 			overflow: auto;
 		}
+		/* Prevent background scroll when modal is open */
+		body.modal-open { overflow: hidden; }
 
 		/* Collapsible top panel (using <details>) */
 		.top-panel {
@@ -150,6 +152,9 @@
 		.corner-notes {
 			font-size: x-small !important;
 		}
+		#info-content p {
+			margin: 1rem;
+		}
 
 		#win-message {
 			position: absolute;
@@ -215,9 +220,19 @@
 					<h1 class="text-l sm:text-l font-bold text-slate-700 dark:text-slate-200">Custom jigsaw puzzle</h1>
 					<div class="hidden sm:block sm:ml-auto"></div>
 					<span class="corner-notes text-slate-800 dark:text-slate-200 text-sm sm:text-base">
-						<span class="hidden sm:inline">Runs entirely in your browser - your images are not sent to any other computer. </span>
-						<span class="hidden sm:inline">Supports animated GIFs, WEBM, and MP4!</span>
+						<span class="hidden sm:inline">Runs entirely in your browser - your files are not uploaded. </span>
 					</span>
+					<!-- Info button -->
+					<button id="info-btn" type="button" class="ml-auto inline-flex items-center gap-1 rounded-md border border-slate-300 dark:border-slate-600
+							bg-white/90 dark:bg-slate-800/90 px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-200
+							hover:bg-white dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+						aria-haspopup="dialog" aria-controls="info-modal">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+							<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 100-2 1 1 0 000 2zm1 7V9H9v2h1v3h2z"
+								clip-rule="evenodd" />
+						</svg>
+						More info
+					</button>
 				</div>
 				<span class="chev text-slate-600 dark:text-slate-300" aria-hidden="true">▾</span>
 			</summary>
@@ -309,7 +324,7 @@
 		</main>
 	</div>
 
-	<!-- DEBUG HUD -->
+	<!-- Debug HUD -->
 	<div id="debug-hud">
 		<h3>Debug</h3>
 		<div id="debug-controls">
@@ -321,6 +336,38 @@
 		<div id="debug-row">
 			<canvas id="debug-padded"></canvas>
 			<pre id="debug-metrics"></pre>
+		</div>
+	</div>
+
+	<!-- Info modal -->
+	<div id="info-modal" class="fixed inset-0 z-[10000] hidden">
+		<div id="info-backdrop" class="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
+
+		<div role="dialog" aria-modal="true" aria-labelledby="info-title" class="absolute inset-x-4 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 top-16 sm:top-24
+				max-w-prose rounded-xl shadow-lg border border-slate-200 dark:border-slate-700
+				bg-white dark:bg-slate-800 p-4">
+			<div class="flex items-start justify-between gap-4">
+				<h2 id="info-title" class="text-base font-semibold">More info</h2>
+				<button id="info-close" type="button" class="rounded-md p-1 text-slate-600 dark:text-slate-300
+						hover:bg-slate-100 dark:hover:bg-slate-700
+						focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"
+						aria-hidden="true">
+						<path fill-rule="evenodd"
+							d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+							clip-rule="evenodd" />
+					</svg>
+				</button>
+			</div>
+
+			<div id="info-content" class="mt-2 text-m leading-relaxed">
+				<p>This is an online game that generates jigsaw puzzles from files on your computer. It supports images, GIFs, and videos in WEBM/MP4 format. If the video has audio, you can enable it using the checkbox.</p>
+				<p>This game runs entirely in your browser. Your files are not uploaded to any other computer.</p>
+				<p>You can save this webpage to play the game offline. You should save it as a "complete webpage", not "HTML only". (This has not been thoroughly tested yet.) The game also works on phones.</p>
+				<p>Choose a difficulty level using the dropdown list. This determines how many pieces your file is sliced into. The options are chosen to make the pieces roughly square-shaped.</p>
+				<p>Known issues: On Firefox, GIFs may not always render correctly, and videos may pause unexpectedly. Try using a different browser, like Chromium.  </p>
+				<p>This site was mostly coded by ChatGPT 5 and Gemini. The game is released as free software under the MIT license. You can play this game for free online at <a href="https://stephenbarnes.github.io/CustomJigsaw/">stephenbarnes.github.io/CustomJigsaw</a>. You can contribute to development on <a href="https://github.com/StephenBarnes/CustomJigsaw">GitHub</a>.</p>
+			</div>
 		</div>
 	</div>
 
@@ -343,11 +390,19 @@ const winMessage = document.getElementById('win-message');
 const uiDebugToggle = document.getElementById('ui-debug-toggle');
 const darkToggle = document.getElementById('dark-mode-toggle');
 uiDebugToggle.checked = false;
+
+// Audio elements
 const audioControls = document.getElementById('audio-controls');
 const audioToggle = document.getElementById('audio-toggle');
 const audioVolume = document.getElementById('audio-volume');
 const topPanel = document.getElementById('top-panel');
 const topExpander = document.getElementById('top-expander');
+
+// Info modal elements
+const infoBtn = document.getElementById('info-btn');
+const infoModal = document.getElementById('info-modal');
+const infoBackdrop = document.getElementById('info-backdrop');
+const infoClose = document.getElementById('info-close');
 
 // Handle collapsing top bar
 // Persist user choice (especially on desktop)
@@ -358,7 +413,7 @@ const topExpander = document.getElementById('top-expander');
 		syncTopExpander();
 	}
 })();
-// Reflow puzzle when panel opens/closes so the board resizes cleanly
+// Reflow puzzle when panel closes so the board resizes cleanly
 topPanel.addEventListener('toggle', () => {
 	try { relayoutPuzzlePreserveGroups(); } catch {}
 	localStorage.setItem('jigsaw-top-open', topPanel.open ? 'true' : 'false');
@@ -412,12 +467,59 @@ audioVolume.addEventListener('input', () => {
 });
 
 function syncTopExpander() {
-// Show the floating button only when the top panel is collapsed
-if (!topPanel.open) {
-	topExpander?.classList.remove('hidden');
-} else {
-	topExpander?.classList.add('hidden');
+	// Show the floating button only when the top panel is collapsed
+	if (!topPanel.open) {
+		topExpander?.classList.remove('hidden');
+	} else {
+		topExpander?.classList.add('hidden');
+	}
 }
+
+/* ================================
+Info modal: open/close + back button + Esc + outside click
+================================ */
+function isInfoOpen() {
+	return infoModal && !infoModal.classList.contains('hidden');
+}
+function openInfo(pushHistory = true) {
+	if (!infoModal) { log("Error: no info modal"); return; }
+	infoModal.classList.remove('hidden');
+	document.body.classList.add('modal-open');
+	document.addEventListener('keydown', onInfoKeydown);
+	// Push a lightweight history state so the phone Back button closes the modal
+	if (pushHistory) {
+		try {
+			history.pushState({ jigsawInfoOpen: true }, '', '#info');
+		} catch { }
+	}
+}
+function closeInfo(fromPopstate = false) {
+	if (!isInfoOpen()) return;
+	infoModal.classList.add('hidden');
+	document.body.classList.remove('modal-open');
+	document.removeEventListener('keydown', onInfoKeydown);
+	// If we initiated the close (not via back), also pop the history entry
+	if (!fromPopstate && history.state && history.state.jigsawInfoOpen) {
+		try { history.back(); } catch { }
+	}
+}
+function onInfoKeydown(e) {
+	if (e.key === 'Escape') closeInfo();
+}
+// Open from button
+infoBtn?.addEventListener('click', () => openInfo(true));
+// Close via backdrop or X button
+infoBackdrop?.addEventListener('click', () => closeInfo());
+infoClose?.addEventListener('click', () => closeInfo());
+// Handle browser back/forward
+window.addEventListener('popstate', () => {
+	// If the modal is open and we navigated back, close it silently
+	if (isInfoOpen()) closeInfo(true);
+});
+// If someone lands directly on #info, open without pushing another state
+if (location.hash === '#info') {
+	// Defer until after layout to avoid reflow flicker
+	setTimeout(() => openInfo(false), 0);
 }
 
 // Debug HUD elements (shown only when debug enabled)
@@ -628,8 +730,7 @@ window.addEventListener('resize', () => {
 	cancelAnimationFrame(resizeRAF);
 	resizeRAF = requestAnimationFrame(() => {
 		log('window.resize → relayout (preserve groups)');
-		buildDifficultyOptions();           // keep dropdown labels up to date
-		relayoutPuzzlePreserveGroups();     // <— new function (see below)
+		relayoutPuzzlePreserveGroups();
 	});
 });
 
@@ -1395,6 +1496,7 @@ function createPuzzle() {
 	log('createPuzzle done', { token: myToken, pieces: pieceGroups.length });
 }
 
+// Relayout puzzle, preserving already-assembled groups.
 function relayoutPuzzlePreserveGroups() {
 	if (!assemblyArea || !pieceGroups.length) return;
 
@@ -1414,7 +1516,7 @@ function relayoutPuzzlePreserveGroups() {
 	puzzleBoard.style.height = `${boardHeight}px`;
 
 	// Assembly area sizing (same policy as createPuzzle: ~70% width, <=90% height)
-	let assemblyWidth = Math.floor(boardWidth * 0.7);
+	let assemblyWidth = Math.floor(containerWidth * (isMobileNarrow?.() ? 0.92 : 0.7));
 	let assemblyHeight = Math.round(assemblyWidth / paddedAspect);
 	if (assemblyHeight > Math.floor(boardHeight * 0.9)) {
 		assemblyHeight = Math.floor(boardHeight * 0.9);
