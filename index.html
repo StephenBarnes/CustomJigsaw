@@ -54,6 +54,8 @@
 			display: inline-block;
 			transition: transform .2s ease;
 		}
+		/* Hide entire summary bar when the top panel is collapsed */
+		.top-panel:not([open]) .top-summary { display: none; }
 		.top-panel[open] .chev { transform: rotate(180deg); }
 
 		/* Keep the control panel visually grouped under the summary */
@@ -256,7 +258,7 @@
 						</label>
 
 						<!-- Shown only when a video with audio is loaded -->
-						<label id="audio-controls" class="flex items-center gap-2 text-sm select-none" style="display:none">
+						<label id="audio-controls" class="flex items-center gap-2 text-sm select-none">
 							<input id="audio-toggle" type="checkbox" class="cursor-pointer">
 							<span class="font-medium">Audio</span>
 							<input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.8" class="w-24">
@@ -292,6 +294,18 @@
 					Drop image / GIF / WEBM / MP4 to start
 				</div>
 			</div>
+
+			<!-- Expander button (only shown when top panel is collapsed) -->
+			<button id="top-expander"
+			class="hidden absolute top-2 right-2 z-50 rounded-md border border-slate-300 dark:border-slate-600
+					bg-white/90 dark:bg-slate-800/90 shadow px-2 py-1 text-slate-700 dark:text-slate-200
+					hover:bg-white dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+			type="button" aria-label="Show controls">
+			<!-- chevron-down icon -->
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+				<path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.17l3.71-2.94a.75.75 0 111.04 1.08l-4.24 3.36a.75.75 0 01-.94 0L5.21 8.31a.75.75 0 01.02-1.1z" clip-rule="evenodd"/>
+			</svg>
+			</button>
 		</main>
 	</div>
 
@@ -311,875 +325,894 @@
 	</div>
 
 	<script>
-		/* ================================
-		App State & Feature Flags
-		================================ */
+/* ================================
+App State & Feature Flags
+================================ */
 
-		let DEBUG_ENABLED = false;            // UI toggle
-		let USE_BITMAP = false;               // toggled in HUD
-		let USE_COMPOSITE_COPY = true;        // toggled in HUD
+let DEBUG_ENABLED = false;            // UI toggle
+let USE_BITMAP = false;               // toggled in HUD
+let USE_COMPOSITE_COPY = true;        // toggled in HUD
 
-		const imageLoader = document.getElementById('image-loader');
-		const difficultySelect = document.getElementById('difficulty-select');
-		const scrambleBtn = document.getElementById('scramble-btn');
-		scrambleBtn.disabled = true;
-		const puzzleBoard = document.getElementById('puzzle-board');
-		const boardPlaceholder = document.getElementById('board-placeholder');
-		const winMessage = document.getElementById('win-message');
-		const uiDebugToggle = document.getElementById('ui-debug-toggle');
-		const darkToggle = document.getElementById('dark-mode-toggle');
-		uiDebugToggle.checked = false;
-		const audioControls = document.getElementById('audio-controls');
-		const audioToggle = document.getElementById('audio-toggle');
-		const audioVolume = document.getElementById('audio-volume');
-		const topPanel = document.getElementById('top-panel');
+const imageLoader = document.getElementById('image-loader');
+const difficultySelect = document.getElementById('difficulty-select');
+const scrambleBtn = document.getElementById('scramble-btn');
+scrambleBtn.disabled = true;
+const puzzleBoard = document.getElementById('puzzle-board');
+const boardPlaceholder = document.getElementById('board-placeholder');
+const winMessage = document.getElementById('win-message');
+const uiDebugToggle = document.getElementById('ui-debug-toggle');
+const darkToggle = document.getElementById('dark-mode-toggle');
+uiDebugToggle.checked = false;
+const audioControls = document.getElementById('audio-controls');
+const audioToggle = document.getElementById('audio-toggle');
+const audioVolume = document.getElementById('audio-volume');
+const topPanel = document.getElementById('top-panel');
+const topExpander = document.getElementById('top-expander');
 
-		// Handle collapsing top bar
-		// Persist user choice (especially on desktop)
-		(function initTopPanelOpen() {
-			const saved = localStorage.getItem('jigsaw-top-open');
-			if (saved === 'true' || saved === 'false') {
-				topPanel.open = (saved === 'true');
-			}
-		})();
-		// Reflow puzzle when panel opens/closes so the board resizes cleanly
-		topPanel.addEventListener('toggle', () => {
-			try { relayoutPuzzlePreserveGroups(); } catch {}
-			localStorage.setItem('jigsaw-top-open', topPanel.open ? 'true' : 'false');
-		});
-		// Helper to collapse on small screens
-		function isMobileNarrow() {
-			return window.matchMedia('(max-width: 640px)').matches;
+// Handle collapsing top bar
+// Persist user choice (especially on desktop)
+(function initTopPanelOpen() {
+	const saved = localStorage.getItem('jigsaw-top-open');
+	if (saved === 'true' || saved === 'false') {
+		topPanel.open = (saved === 'true');
+		syncTopExpander();
+	}
+})();
+// Reflow puzzle when panel opens/closes so the board resizes cleanly
+topPanel.addEventListener('toggle', () => {
+	try { relayoutPuzzlePreserveGroups(); } catch {}
+	localStorage.setItem('jigsaw-top-open', topPanel.open ? 'true' : 'false');
+	syncTopExpander();
+});
+// Helper to collapse on small screens
+function isMobileNarrow() {
+	return window.matchMedia('(max-width: 640px)').matches;
+}
+function collapseTopPanelForMobile() {
+	if (isMobileNarrow()) {
+		topPanel.open = false;
+		syncTopExpander();
+		// Let the DOM settle, then relayout
+		setTimeout(() => { try { relayoutPuzzlePreserveGroups(); } catch {} }, 0);
+	}
+}
+topExpander?.addEventListener('click', () => {
+	topPanel.open = true;
+	syncTopExpander();
+	try { relayoutPuzzlePreserveGroups(); } catch { }
+	localStorage.setItem('jigsaw-top-open', 'true');
+});
+
+// Initialize dark mode from system or localStorage
+(function initTheme() {
+	const saved = localStorage.getItem('jigsaw-theme');
+	const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+	const shouldDark = saved ? (saved === 'dark') : prefersDark;
+	document.documentElement.classList.toggle('dark', shouldDark);
+	darkToggle.checked = shouldDark;
+})();
+
+darkToggle.addEventListener('change', () => {
+	const enabled = darkToggle.checked;
+	document.documentElement.classList.toggle('dark', enabled);
+	localStorage.setItem('jigsaw-theme', enabled ? 'dark' : 'light');
+});
+
+// Audio controls event listeners
+audioToggle.addEventListener('change', () => {
+	const enable = audioToggle.checked;
+	if (!frameSource || typeof frameSource.setMuted !== 'function') return;
+	frameSource.setMuted(!enable);
+	// Nudge play() on user gesture in case the browser paused it
+	try { frameSource._video?.play?.(); } catch { }
+});
+audioVolume.addEventListener('input', () => {
+	if (!frameSource || typeof frameSource.setVolume !== 'function') return;
+	frameSource.setVolume(parseFloat(audioVolume.value) || 0);
+});
+
+function syncTopExpander() {
+// Show the floating button only when the top panel is collapsed
+if (!topPanel.open) {
+	topExpander?.classList.remove('hidden');
+} else {
+	topExpander?.classList.add('hidden');
+}
+}
+
+// Debug HUD elements (shown only when debug enabled)
+const debugHud = document.getElementById('debug-hud');
+const debugEnv = document.getElementById('debug-env');
+const debugLogEl = document.getElementById('debug-log');
+const debugPaddedCanvas = document.getElementById('debug-padded');
+const debugMetricsEl = document.getElementById('debug-metrics');
+const toggleBitmap = document.getElementById('toggle-bitmap');
+const toggleCopy = document.getElementById('toggle-copy');
+
+// Puzzle layout state
+let assemblyArea = null;
+let pieceGroups = [];
+let basePuzzleSize = 4;
+let puzzleSizeX = 4;
+let puzzleSizeY = 4;
+let pieceWidth = 0;
+let pieceHeight = 0;
+let puzzleSolved = false;
+let buildToken = 0;
+
+const SNAP_TOLERANCE = 30;
+
+/* Click SFX (plays on merge). We clone for overlapping plays. */
+const CLICK_VOLUME = 0.15;
+const clickAudio = new Audio('./assets/click.mp3');
+clickAudio.preload = 'auto';
+clickAudio.volume = CLICK_VOLUME;
+
+function playClick() {
+	try {
+		// Clone to allow rapid consecutive merges to overlap.
+		const a = clickAudio.cloneNode();
+		a.volume = CLICK_VOLUME;
+		// Play is user-gesture unlocked because it happens after a drag.
+		a.play().catch(() => {});
+		setTimeout(() => { try { a.remove(); } catch {} }, 4000);
+	} catch {}
+}
+
+/* Visual overlay that sweeps diagonally across the newly merged group. */
+function runMergeHighlight(group) {
+	// Remove any previous highlight still hanging around (e.g., mid-animation)
+	try {
+		group.element.querySelectorAll('.merge-highlight').forEach(n => n.remove());
+	} catch {}
+	// Size to group's occupied grid area
+	const w = Math.max(1, group.widthInPieces * pieceWidth);
+	const h = Math.max(1, group.heightInPieces * pieceHeight);
+	const overlay = document.createElement('div');
+	overlay.className = 'merge-highlight';
+	overlay.style.width = `${w}px`;
+	overlay.style.height = `${h}px`;
+	group.element.appendChild(overlay);
+	// kick off animations
+	// (force reflow so class change triggers keyframes in all browsers)
+	void overlay.offsetHeight;
+	overlay.classList.add('run');
+	overlay.addEventListener('animationend', () => {
+		try { overlay.remove(); } catch {}
+	}, { once: true });
+}
+
+// Source decoding / rendering state
+let srcFile = null;
+let frameSource = null;         // implements IFrameSource (see below)
+let sliceSourceCanvas = null;   // padded frame canvas (current frame)
+let sliceSourceW = 0;
+let sliceSourceH = 0;
+let imageAspectRatio = 1;
+let paddedReuseCanvas = null; // reused for slicing
+
+// Animation loop (for future GIF support)
+let animRAF = null;
+let animRunning = false;
+
+function clamp(val, min, max) { return Math.max(min, Math.min(val, max)); }
+
+/* ================================
+Building difficulty options around current image aspect.
+================================ */
+function buildDifficultyOptions() {
+	if (!frameSource?.ready) {
+		difficultySelect.innerHTML = '';
+		return;
+	}
+
+	const aspect = imageAspectRatio; // w/h
+	const options = [];
+
+	// For k=2..12, compute gridX/gridY so pieces are ~square
+	for (let k = 2; k <= 12; k++) {
+		// Choose the short side = k, compute the long side ≈ k*aspect (rounded)
+		let gx, gy;
+		if (aspect >= 1) {
+			// wide image
+			gx = Math.max(3, Math.round(k * aspect));
+			gy = k;
+		} else {
+			// tall image
+			gx = k;
+			gy = Math.max(3, Math.round(k / aspect));
 		}
-		function collapseTopPanelForMobile() {
-			if (isMobileNarrow()) {
-				topPanel.open = false;
-				// Let the DOM settle, then relayout
-				setTimeout(() => { try { relayoutPuzzlePreserveGroups(); } catch {} }, 0);
-			}
+		options.push([gx, gy]);
+	}
+
+	// Deduplicate (e.g., many k may map to the same pair), and cap sizes
+	const key = (p) => `${p[0]}x${p[1]}`;
+	const seen = new Set();
+	const deduped = [];
+	for (const p of options) {
+		const k = key(p);
+		if (!seen.has(k) && p[0] <= 100 && p[1] <= 100) { // basic sanity caps
+			seen.add(k);
+			deduped.push(p);
 		}
+	}
 
-		// Initialize dark mode from system or localStorage
-		(function initTheme() {
-			const saved = localStorage.getItem('jigsaw-theme');
-			const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-			const shouldDark = saved ? (saved === 'dark') : prefersDark;
-			document.documentElement.classList.toggle('dark', shouldDark);
-			darkToggle.checked = shouldDark;
-		})();
+	// Sort by approx number of pieces (ascending)
+	deduped.sort((a, b) => (a[0] * a[1]) - (b[0] * b[1]));
 
-		darkToggle.addEventListener('change', () => {
-			const enabled = darkToggle.checked;
-			document.documentElement.classList.toggle('dark', enabled);
-			localStorage.setItem('jigsaw-theme', enabled ? 'dark' : 'light');
-		});
+	// Fill the <select>, keep the previously-selected value if possible
+	const prev = `${puzzleSizeX}x${puzzleSizeY}`;
+	difficultySelect.innerHTML = deduped.map(([gx, gy]) =>
+		`<option value="${gx}x${gy}">${gx}×${gy}</option>`).join('');
 
-		// Audio controls event listeners
-		audioToggle.addEventListener('change', () => {
-			const enable = audioToggle.checked;
-			if (!frameSource || typeof frameSource.setMuted !== 'function') return;
-			frameSource.setMuted(!enable);
-			// Nudge play() on user gesture in case the browser paused it
-			try { frameSource._video?.play?.(); } catch { }
-		});
-		audioVolume.addEventListener('input', () => {
-			if (!frameSource || typeof frameSource.setVolume !== 'function') return;
-			frameSource.setVolume(parseFloat(audioVolume.value) || 0);
-		});
+	const first = deduped[0];
+	const fallbackVal = `${first[0]}x${first[1]}`;
 
-		// Debug HUD elements (shown only when debug enabled)
-		const debugHud = document.getElementById('debug-hud');
-		const debugEnv = document.getElementById('debug-env');
-		const debugLogEl = document.getElementById('debug-log');
-		const debugPaddedCanvas = document.getElementById('debug-padded');
-		const debugMetricsEl = document.getElementById('debug-metrics');
-		const toggleBitmap = document.getElementById('toggle-bitmap');
-		const toggleCopy = document.getElementById('toggle-copy');
+	const toSelect = difficultySelect.querySelector(`option[value="${prev}"]`)
+		? prev : fallbackVal;
 
-		// Puzzle layout state
-		let assemblyArea = null;
-		let pieceGroups = [];
-		let basePuzzleSize = 4;
-		let puzzleSizeX = 4;
-		let puzzleSizeY = 4;
-		let pieceWidth = 0;
-		let pieceHeight = 0;
-		let puzzleSolved = false;
-		let buildToken = 0;
+	difficultySelect.value = toSelect;
 
-		const SNAP_TOLERANCE = 30;
+	// Apply to state
+	const [gx, gy] = toSelect.split('x').map(Number);
+	puzzleSizeX = gx;
+	puzzleSizeY = gy;
+}
 
-		/* Click SFX (plays on merge). We clone for overlapping plays. */
-		const CLICK_VOLUME = 0.15;
-		const clickAudio = new Audio('./assets/click.mp3');
-		clickAudio.preload = 'auto';
-		clickAudio.volume = CLICK_VOLUME;
+/* ================================
+Debug helpers
+================================ */
+function ts() {
+	return new Date().toISOString().slice(11, 23);
+}
+function log(...args) {
+	if (!DEBUG_ENABLED) return;
+	const line = `[${ts()}] ${args.map(a => (
+		typeof a === 'object' ? JSON.stringify(a) : String(a)
+	)).join(' ')}`;
+	console.log(...args);
+	if (debugLogEl) {
+		debugLogEl.textContent += line + '\n';
+		debugLogEl.scrollTop = debugLogEl.scrollHeight;
+	}
+}
+function clearLog() {
+	if (DEBUG_ENABLED && debugLogEl) debugLogEl.textContent = '';
+}
+function setDebugUI(visible) {
+	DEBUG_ENABLED = visible;
+	debugHud.style.display = visible ? 'block' : 'none';
+	if (visible) {
+		toggleBitmap.checked = USE_BITMAP;
+		toggleCopy.checked = USE_COMPOSITE_COPY;
 
-		function playClick() {
-			try {
-				// Clone to allow rapid consecutive merges to overlap.
-				const a = clickAudio.cloneNode();
-				a.volume = CLICK_VOLUME;
-				// Play is user-gesture unlocked because it happens after a drag.
-				a.play().catch(() => {});
-				setTimeout(() => { try { a.remove(); } catch {} }, 4000);
-			} catch {}
-		}
-
-		/* Visual overlay that sweeps diagonally across the newly merged group. */
-		function runMergeHighlight(group) {
-			// Remove any previous highlight still hanging around (e.g., mid-animation)
-			try {
-				group.element.querySelectorAll('.merge-highlight').forEach(n => n.remove());
-			} catch {}
-			// Size to group's occupied grid area
-			const w = Math.max(1, group.widthInPieces * pieceWidth);
-			const h = Math.max(1, group.heightInPieces * pieceHeight);
-			const overlay = document.createElement('div');
-			overlay.className = 'merge-highlight';
-			overlay.style.width = `${w}px`;
-			overlay.style.height = `${h}px`;
-			group.element.appendChild(overlay);
-			// kick off animations
-			// (force reflow so class change triggers keyframes in all browsers)
-			void overlay.offsetHeight;
-			overlay.classList.add('run');
-			overlay.addEventListener('animationend', () => {
-				try { overlay.remove(); } catch {}
-			}, { once: true });
-		}
-
-		// Source decoding / rendering state
-		let srcFile = null;
-		let frameSource = null;         // implements IFrameSource (see below)
-		let sliceSourceCanvas = null;   // padded frame canvas (current frame)
-		let sliceSourceW = 0;
-		let sliceSourceH = 0;
-		let imageAspectRatio = 1;
-		let paddedReuseCanvas = null; // reused for slicing
-
-		// Animation loop (for future GIF support)
-		let animRAF = null;
-		let animRunning = false;
-
-		function clamp(val, min, max) { return Math.max(min, Math.min(val, max)); }
-
-		/* ================================
-		Building difficulty options around current image aspect.
-		================================ */
-		function buildDifficultyOptions() {
-			if (!frameSource?.ready) {
-				difficultySelect.innerHTML = '';
-				return;
-			}
-
-			const aspect = imageAspectRatio; // w/h
-			const options = [];
-
-			// For k=2..12, compute gridX/gridY so pieces are ~square
-			for (let k = 2; k <= 12; k++) {
-				// Choose the short side = k, compute the long side ≈ k*aspect (rounded)
-				let gx, gy;
-				if (aspect >= 1) {
-					// wide image
-					gx = Math.max(3, Math.round(k * aspect));
-					gy = k;
-				} else {
-					// tall image
-					gx = k;
-					gy = Math.max(3, Math.round(k / aspect));
-				}
-				options.push([gx, gy]);
-			}
-
-			// Deduplicate (e.g., many k may map to the same pair), and cap sizes
-			const key = (p) => `${p[0]}x${p[1]}`;
-			const seen = new Set();
-			const deduped = [];
-			for (const p of options) {
-				const k = key(p);
-				if (!seen.has(k) && p[0] <= 100 && p[1] <= 100) { // basic sanity caps
-					seen.add(k);
-					deduped.push(p);
-				}
-			}
-
-			// Sort by approx number of pieces (ascending)
-			deduped.sort((a, b) => (a[0] * a[1]) - (b[0] * b[1]));
-
-			// Fill the <select>, keep the previously-selected value if possible
-			const prev = `${puzzleSizeX}x${puzzleSizeY}`;
-			difficultySelect.innerHTML = deduped.map(([gx, gy]) =>
-				`<option value="${gx}x${gy}">${gx}×${gy}</option>`).join('');
-
-			const first = deduped[0];
-			const fallbackVal = `${first[0]}x${first[1]}`;
-
-			const toSelect = difficultySelect.querySelector(`option[value="${prev}"]`)
-				? prev : fallbackVal;
-
-			difficultySelect.value = toSelect;
-
-			// Apply to state
-			const [gx, gy] = toSelect.split('x').map(Number);
-			puzzleSizeX = gx;
-			puzzleSizeY = gy;
-		}
-
-		/* ================================
-		Debug helpers
-		================================ */
-		function ts() {
-			return new Date().toISOString().slice(11, 23);
-		}
-		function log(...args) {
-			if (!DEBUG_ENABLED) return;
-			const line = `[${ts()}] ${args.map(a => (
-				typeof a === 'object' ? JSON.stringify(a) : String(a)
-			)).join(' ')}`;
-			console.log(...args);
-			if (debugLogEl) {
-				debugLogEl.textContent += line + '\n';
-				debugLogEl.scrollTop = debugLogEl.scrollHeight;
-			}
-		}
-		function clearLog() {
-			if (DEBUG_ENABLED && debugLogEl) debugLogEl.textContent = '';
-		}
-		function setDebugUI(visible) {
-			DEBUG_ENABLED = visible;
-			debugHud.style.display = visible ? 'block' : 'none';
-			if (visible) {
-				toggleBitmap.checked = USE_BITMAP;
-				toggleCopy.checked = USE_COMPOSITE_COPY;
-
-				debugEnv.textContent =
+		debugEnv.textContent =
 `UA: ${navigator.userAgent}
 createImageBitmap: ${!!window.createImageBitmap}
 colorSpace: ${'colorSpace' in CanvasRenderingContext2D.prototype ? 'yes' : 'no'}
 getImageData: ${typeof CanvasRenderingContext2D.prototype.getImageData}
 `;
-			}
-		}
+	}
+}
 
-		/* ================================
-		UI Events
-		================================ */
-		uiDebugToggle.addEventListener('change', () => {
-			setDebugUI(uiDebugToggle.checked);
-		});
+/* ================================
+UI Events
+================================ */
+uiDebugToggle.addEventListener('change', () => {
+	setDebugUI(uiDebugToggle.checked);
+});
 
-		imageLoader.addEventListener('change', e => {
-			const file = e.target.files?.[0];
-			if (!file) return;
-			srcFile = file;
-			loadFromFile(file);
-			collapseTopPanelForMobile(); // Auto-collapse only on mobile after a selection
-		});
+imageLoader.addEventListener('change', e => {
+	const file = e.target.files?.[0];
+	if (!file) return;
+	srcFile = file;
+	loadFromFile(file);
+	collapseTopPanelForMobile(); // Auto-collapse only on mobile after a selection
+});
 
-		difficultySelect.addEventListener('change', () => {
-			const [gx, gy] = difficultySelect.value.split('x').map(Number);
-			puzzleSizeX = gx;
-			puzzleSizeY = gy;
-			log('difficulty.change → rebuild');
-			createPuzzle();
-		});
+difficultySelect.addEventListener('change', () => {
+	const [gx, gy] = difficultySelect.value.split('x').map(Number);
+	puzzleSizeX = gx;
+	puzzleSizeY = gy;
+	log('difficulty.change → rebuild');
+	createPuzzle();
+});
 
-		scrambleBtn.addEventListener('click', () => {
-			if (frameSource?.ready) createPuzzle();
-		});
+scrambleBtn.addEventListener('click', () => {
+	if (frameSource?.ready) createPuzzle();
+});
 
-		let resizeRAF = null;
-		window.addEventListener('resize', () => {
-			if (!frameSource?.ready) return;
-			cancelAnimationFrame(resizeRAF);
-			resizeRAF = requestAnimationFrame(() => {
-				log('window.resize → relayout (preserve groups)');
-				buildDifficultyOptions();           // keep dropdown labels up to date
-				relayoutPuzzlePreserveGroups();     // <— new function (see below)
-			});
-		});
+let resizeRAF = null;
+window.addEventListener('resize', () => {
+	if (!frameSource?.ready) return;
+	cancelAnimationFrame(resizeRAF);
+	resizeRAF = requestAnimationFrame(() => {
+		log('window.resize → relayout (preserve groups)');
+		buildDifficultyOptions();           // keep dropdown labels up to date
+		relayoutPuzzlePreserveGroups();     // <— new function (see below)
+	});
+});
 
-		// If we cross the sm breakpoint, re-layout once
-		const mm = window.matchMedia('(max-width: 640px)');
-		mm.addEventListener?.('change', () => {
-			try { relayoutPuzzlePreserveGroups(); } catch {}
-		});
+// If we cross the sm breakpoint, re-layout once
+const mm = window.matchMedia('(max-width: 640px)');
+mm.addEventListener?.('change', () => {
+	try { relayoutPuzzlePreserveGroups(); } catch {}
+});
 
-		/* ================================
-		Drag & Drop: behave like the Select Image button
-		================================ */
-		const dropOverlay = document.getElementById('drop-overlay');
-		let dragDepth = 0;
+/* ================================
+Drag & Drop: behave like the Select Image button
+================================ */
+const dropOverlay = document.getElementById('drop-overlay');
+let dragDepth = 0;
 
-		function showDropOverlay() { try { dropOverlay.classList.remove('hidden'); } catch { } }
-		function hideDropOverlay() { try { dropOverlay.classList.add('hidden'); } catch { } }
+function showDropOverlay() { try { dropOverlay.classList.remove('hidden'); } catch { } }
+function hideDropOverlay() { try { dropOverlay.classList.add('hidden'); } catch { } }
 
-		function hasFiles(e) {
-			const dt = e.dataTransfer;
-			if (!dt) return false;
-			// Safari sometimes lacks 'Files' in types; fall back to files length.
-			return (Array.from(dt.types || []).includes('Files')) || (dt.files && dt.files.length > 0);
-		}
+function hasFiles(e) {
+	const dt = e.dataTransfer;
+	if (!dt) return false;
+	// Safari sometimes lacks 'Files' in types; fall back to files length.
+	return (Array.from(dt.types || []).includes('Files')) || (dt.files && dt.files.length > 0);
+}
 
-		function isSupportedFile(file) {
-			if (!file) return false;
-			const t = (file.type || '').toLowerCase();
-			if (/^image\/(png|jpeg|gif)$/.test(t)) return true;
-			if (/^video\/(mp4|webm)$/.test(t)) return true;
-			// Fallback by extension (some browsers omit type for dragged files)
-			const n = (file.name || '').toLowerCase();
-			return /\.(png|jpe?g|gif|mp4|webm)$/.test(n);
-		}
+function isSupportedFile(file) {
+	if (!file) return false;
+	const t = (file.type || '').toLowerCase();
+	if (/^image\/(png|jpeg|gif)$/.test(t)) return true;
+	if (/^video\/(mp4|webm)$/.test(t)) return true;
+	// Fallback by extension (some browsers omit type for dragged files)
+	const n = (file.name || '').toLowerCase();
+	return /\.(png|jpe?g|gif|mp4|webm)$/.test(n);
+}
 
-		function pickFirstSupported(dt) {
-			const files = Array.from(dt.files || []);
-			return files.find(isSupportedFile) || null;
-		}
+function pickFirstSupported(dt) {
+	const files = Array.from(dt.files || []);
+	return files.find(isSupportedFile) || null;
+}
 
-		// Allow dropping anywhere on the document without navigating away
-		document.addEventListener('dragover', (e) => {
-			if (!hasFiles(e)) return;
-			e.preventDefault(); // critical: enables drop
-		});
+// Allow dropping anywhere on the document without navigating away
+document.addEventListener('dragover', (e) => {
+	if (!hasFiles(e)) return;
+	e.preventDefault(); // critical: enables drop
+});
 
-		document.addEventListener('dragenter', (e) => {
-			if (!hasFiles(e)) return;
-			e.preventDefault();
-			dragDepth++;
-			showDropOverlay();
-		});
+document.addEventListener('dragenter', (e) => {
+	if (!hasFiles(e)) return;
+	e.preventDefault();
+	dragDepth++;
+	showDropOverlay();
+});
 
-		document.addEventListener('dragleave', (e) => {
-			if (!hasFiles(e)) return;
-			// Track nested enter/leave events so we only hide when truly leaving the page
-			dragDepth = Math.max(0, dragDepth - 1);
-			if (dragDepth === 0) hideDropOverlay();
-		});
+document.addEventListener('dragleave', (e) => {
+	if (!hasFiles(e)) return;
+	// Track nested enter/leave events so we only hide when truly leaving the page
+	dragDepth = Math.max(0, dragDepth - 1);
+	if (dragDepth === 0) hideDropOverlay();
+});
 
-		document.addEventListener('drop', (e) => {
-			if (!hasFiles(e)) return;
-			e.preventDefault();
-			dragDepth = 0;
-			hideDropOverlay();
+document.addEventListener('drop', (e) => {
+	if (!hasFiles(e)) return;
+	e.preventDefault();
+	dragDepth = 0;
+	hideDropOverlay();
 
-			const file = pickFirstSupported(e.dataTransfer);
-			if (!file) {
-				alert('Unsupported file type.\nPlease use PNG, JPG, GIF, WEBM, or MP4.');
-				return;
-			}
+	const file = pickFirstSupported(e.dataTransfer);
+	if (!file) {
+		alert('Unsupported file type.\nPlease use PNG, JPG, GIF, WEBM, or MP4.');
+		return;
+	}
 
-			srcFile = file;
-			loadFromFile(file);
-			// Match the behavior of the file picker on mobile
-			try { if (isMobileNarrow()) collapseTopPanelForMobile(); } catch { }
-		});
+	srcFile = file;
+	loadFromFile(file);
+	// Match the behavior of the file picker on mobile
+	try { if (isMobileNarrow()) collapseTopPanelForMobile(); } catch { }
+});
 
-		/* ================================
-		Debug HUD event wiring
-		================================ */
-		toggleBitmap.addEventListener('change', () => {
-			USE_BITMAP = toggleBitmap.checked;
-			log('TOGGLE USE_BITMAP', USE_BITMAP);
-			if (srcFile) loadFromFile(srcFile);
-		});
-		toggleCopy.addEventListener('change', () => {
-			USE_COMPOSITE_COPY = toggleCopy.checked;
-			log('TOGGLE composite=copy', USE_COMPOSITE_COPY);
-			if (frameSource?.ready) createPuzzle();
-		});
+/* ================================
+Debug HUD event wiring
+================================ */
+toggleBitmap.addEventListener('change', () => {
+	USE_BITMAP = toggleBitmap.checked;
+	log('TOGGLE USE_BITMAP', USE_BITMAP);
+	if (srcFile) loadFromFile(srcFile);
+});
+toggleCopy.addEventListener('change', () => {
+	USE_COMPOSITE_COPY = toggleCopy.checked;
+	log('TOGGLE composite=copy', USE_COMPOSITE_COPY);
+	if (frameSource?.ready) createPuzzle();
+});
 
-		/* ================================
-		IFrameSource (prepping for GIFs)
-		--------------------------------
-		StaticImageSource: wraps a single decoded image or ImageBitmap.
-		GifFrameSource: decodes frames & exposes a synced canvas.
-		VideoFrameSource: for WEBM and MP4
-		================================ */
+/* ================================
+IFrameSource (prepping for GIFs)
+--------------------------------
+StaticImageSource: wraps a single decoded image or ImageBitmap.
+GifFrameSource: decodes frames & exposes a synced canvas.
+VideoFrameSource: for WEBM and MP4
+================================ */
 
-		function fileToDataURL(file) {
-			return new Promise((res, rej) => {
-				const r = new FileReader();
-				r.onerror = () => rej(r.error);
-				r.onload = () => res(r.result);
-				r.readAsDataURL(file);
-			});
-		}
-		function loadHTMLImage(src) {
-			return new Promise((res, rej) => {
-				const img = new Image();
-				img.decoding = 'async';
-				img.onload = async () => {
-					try { if (img.decode) await img.decode(); } catch { }
-					res(img);
-				};
-				img.onerror = rej;
-				img.src = src;
-			});
-		}
+function fileToDataURL(file) {
+	return new Promise((res, rej) => {
+		const r = new FileReader();
+		r.onerror = () => rej(r.error);
+		r.onload = () => res(r.result);
+		r.readAsDataURL(file);
+	});
+}
+function loadHTMLImage(src) {
+	return new Promise((res, rej) => {
+		const img = new Image();
+		img.decoding = 'async';
+		img.onload = async () => {
+			try { if (img.decode) await img.decode(); } catch { }
+			res(img);
+		};
+		img.onerror = rej;
+		img.src = src;
+	});
+}
 
-		class StaticImageSource {
-			constructor(width, height, source) {
-				this.ready = true;
-				this.animated = false;
-				this.width = width;
-				this.height = height;
-				this._element = source;
-				this._canvas = document.createElement('canvas');
-				this._canvas.width = width;
-				this._canvas.height = height;
-				const ctx = this._canvas.getContext('2d', { willReadFrequently: true });
-				ctx.drawImage(source, 0, 0, width, height);
-			}
-			currentFrameCanvas() {
-				return this._canvas;
-			}
-			sourceElement() {
-				return this._element;
-			}
-			start() {}
-			stop() {}
-		}
+class StaticImageSource {
+	constructor(width, height, source) {
+		this.ready = true;
+		this.animated = false;
+		this.width = width;
+		this.height = height;
+		this._element = source;
+		this._canvas = document.createElement('canvas');
+		this._canvas.width = width;
+		this._canvas.height = height;
+		const ctx = this._canvas.getContext('2d', { willReadFrequently: true });
+		ctx.drawImage(source, 0, 0, width, height);
+	}
+	currentFrameCanvas() {
+		return this._canvas;
+	}
+	sourceElement() {
+		return this._element;
+	}
+	start() {}
+	stop() {}
+}
 
-		class GifFrameSource {
-			constructor(file) {
-				this.ready = false;
-				this.animated = true;
-				this.width = 1;
-				this.height = 1;
+class GifFrameSource {
+	constructor(file) {
+		this.ready = false;
+		this.animated = true;
+		this.width = 1;
+		this.height = 1;
 
-				this._canvas = document.createElement('canvas');
-				this._ctx = this._canvas.getContext('2d', { willReadFrequently: true });
-				this._animator = null;
-				this._onFrame = () => { };
-				this._onReady = null;
-				this._objectURL = URL.createObjectURL(file);
+		this._canvas = document.createElement('canvas');
+		this._ctx = this._canvas.getContext('2d', { willReadFrequently: true });
+		this._animator = null;
+		this._onFrame = () => { };
+		this._onReady = null;
+		this._objectURL = URL.createObjectURL(file);
 
-				// For disposal handling
-				this._prevRect = null;           // {x,y,w,h}
-				this._prevDisposal = 0;          // 0/1/2/3
-				this._snapshot = null;           // ImageData for dispose=3
+		// For disposal handling
+		this._prevRect = null;           // {x,y,w,h}
+		this._prevDisposal = 0;          // 0/1/2/3
+		this._snapshot = null;           // ImageData for dispose=3
 
-				gifler(this._objectURL).get((animator) => {
-					this._animator = animator;
+		gifler(this._objectURL).get((animator) => {
+			this._animator = animator;
 
-					// Let gifler size our canvas to GIF logical screen
-					animator.animateInCanvas(this._canvas, /* setDimensions */ true);
-					this.width = this._canvas.width;
-					this.height = this._canvas.height;
+			// Let gifler size our canvas to GIF logical screen
+			animator.animateInCanvas(this._canvas, /* setDimensions */ true);
+			this.width = this._canvas.width;
+			this.height = this._canvas.height;
 
-					// We manage compositing ourselves for cross-browser correctness.
-					animator.onDrawFrame = (_ctxFromGifler, frame) => {
-						const x = ('x' in frame) ? frame.x : (frame.dims?.left || 0);
-						const y = ('y' in frame) ? frame.y : (frame.dims?.top || 0);
-						const w = ('width' in frame) ? frame.width : (frame.dims?.width || frame.buffer?.width || 0);
-						const h = ('height' in frame) ? frame.height : (frame.dims?.height || frame.buffer?.height || 0);
-						const disposal = (typeof frame.disposalType === 'number') ? frame.disposalType : 0;
+			// We manage compositing ourselves for cross-browser correctness.
+			animator.onDrawFrame = (_ctxFromGifler, frame) => {
+				const x = ('x' in frame) ? frame.x : (frame.dims?.left || 0);
+				const y = ('y' in frame) ? frame.y : (frame.dims?.top || 0);
+				const w = ('width' in frame) ? frame.width : (frame.dims?.width || frame.buffer?.width || 0);
+				const h = ('height' in frame) ? frame.height : (frame.dims?.height || frame.buffer?.height || 0);
+				const disposal = (typeof frame.disposalType === 'number') ? frame.disposalType : 0;
 
-						// Apply disposal of the *previous* frame
-						if (this._prevRect) {
-							if (this._prevDisposal === 2) {
-								// Restore to background: clear the previous rect
-								this._ctx.clearRect(this._prevRect.x, this._prevRect.y, this._prevRect.w, this._prevRect.h);
-							} else if (this._prevDisposal === 3 && this._snapshot) {
-								// Restore to previous: put back the snapshot
-								try {
-									this._ctx.putImageData(this._snapshot, 0, 0);
-								} catch { }
-							}
-						}
-
-						// If the upcoming frame asks for "restore to previous", take a snapshot now.
-						// (Most encoders use this sparingly; snapshot once per frame is OK for our sizes.)
-						this._snapshot = null;
-						if (disposal === 3) {
-							try {
-								this._snapshot = this._ctx.getImageData(0, 0, this.width, this.height);
-							} catch {
-								this._snapshot = null;
-							}
-						}
-
-						// Draw the current patch
-						this._ctx.globalCompositeOperation = 'source-over';
+				// Apply disposal of the *previous* frame
+				if (this._prevRect) {
+					if (this._prevDisposal === 2) {
+						// Restore to background: clear the previous rect
+						this._ctx.clearRect(this._prevRect.x, this._prevRect.y, this._prevRect.w, this._prevRect.h);
+					} else if (this._prevDisposal === 3 && this._snapshot) {
+						// Restore to previous: put back the snapshot
 						try {
-							this._ctx.drawImage(frame.buffer, x, y);
-						} catch (e) {
-							// Extremely old Firefox builds had stricter types for drawImage;
-							// no-op here to avoid crashing the loop.
-						}
+							this._ctx.putImageData(this._snapshot, 0, 0);
+						} catch { }
+					}
+				}
 
-						// Record disposal info for next tick
-						this._prevRect = { x, y, w, h };
-						this._prevDisposal = disposal | 0;
-
-						// Notify listeners
-						this._onFrame();
-					};
-
-					this.ready = true;
-					if (this._onReady) this._onReady();
-				});
-			}
-
-			currentFrameCanvas() { return this._canvas; }
-			sourceElement() { return this._canvas; }
-
-			onReady(cb) { this._onReady = cb; if (this.ready) cb(); }
-			onFrame(cb) { this._onFrame = cb || (() => { }); }
-
-			start() { if (this._animator) this._animator.start(); }
-			stop() { if (this._animator) this._animator.stop(); }
-
-			destroy() {
-				try { this.stop(); } catch { }
+				// If the upcoming frame asks for "restore to previous", take a snapshot now.
+				// (Most encoders use this sparingly; snapshot once per frame is OK for our sizes.)
 				this._snapshot = null;
-				if (this._objectURL) URL.revokeObjectURL(this._objectURL);
+				if (disposal === 3) {
+					try {
+						this._snapshot = this._ctx.getImageData(0, 0, this.width, this.height);
+					} catch {
+						this._snapshot = null;
+					}
+				}
+
+				// Draw the current patch
+				this._ctx.globalCompositeOperation = 'source-over';
+				try {
+					this._ctx.drawImage(frame.buffer, x, y);
+				} catch (e) {
+					// Extremely old Firefox builds had stricter types for drawImage;
+					// no-op here to avoid crashing the loop.
+				}
+
+				// Record disposal info for next tick
+				this._prevRect = { x, y, w, h };
+				this._prevDisposal = disposal | 0;
+
+				// Notify listeners
+				this._onFrame();
+			};
+
+			this.ready = true;
+			if (this._onReady) this._onReady();
+		});
+	}
+
+	currentFrameCanvas() { return this._canvas; }
+	sourceElement() { return this._canvas; }
+
+	onReady(cb) { this._onReady = cb; if (this.ready) cb(); }
+	onFrame(cb) { this._onFrame = cb || (() => { }); }
+
+	start() { if (this._animator) this._animator.start(); }
+	stop() { if (this._animator) this._animator.stop(); }
+
+	destroy() {
+		try { this.stop(); } catch { }
+		this._snapshot = null;
+		if (this._objectURL) URL.revokeObjectURL(this._objectURL);
+	}
+}
+
+class VideoFrameSource {
+	constructor(file) {
+		this.ready = false;
+		this.animated = true;
+		this.width = 1;
+		this.height = 1;
+
+		this._canvas = document.createElement('canvas');
+		this._ctx = this._canvas.getContext('2d', { willReadFrequently: true });
+		this._onFrame = () => {};
+		this._onReady = null;
+
+		this._objectURL = URL.createObjectURL(file);
+		this._video = document.createElement('video');
+		this._video.src = this._objectURL;
+		this._video.loop = true;
+		this._video.playsInline = true;
+		this._video.preload = 'auto';
+
+		this._video.muted = !audioToggle.checked; // audio off by default, but persists between videos
+		this._hasAudio = false;
+		this._onAudioStatus = () => {};
+
+		this._rVFCToken = null;
+		this._playing = false;
+
+		const detectHasAudio = () => {
+			const v = this._video;
+			// A mix of vendor signals; any true implies audio present.
+			const has =
+				!!(v.mozHasAudio) ||
+				!!(v.webkitAudioDecodedByteCount > 0) ||
+				!!(v.audioTracks && v.audioTracks.length > 0);
+			if (has && !this._hasAudio) {
+				this._hasAudio = true;
+				this._onAudioStatus(true);
 			}
+		};
+
+		this._video.addEventListener('loadedmetadata', () => {
+			this.width  = Math.max(1, this._video.videoWidth | 0);
+			this.height = Math.max(1, this._video.videoHeight | 0);
+			this._canvas.width = this.width;
+			this._canvas.height = this.height;
+
+			// Initial probe - some engines only populate after play/timeupdate
+			detectHasAudio();
+			// Keep probing briefly as playback begins (helps Safari/WebKit)
+			const onTU = () => detectHasAudio();
+			this._video.addEventListener('timeupdate', onTU, { once: true });
+
+			const fireReady = () => {
+				if (this.ready) return;
+				// draw once so the canvas is non-empty
+				this._drawCurrentFrame();
+				this.ready = true;
+				if (this._onReady) this._onReady();
+			};
+
+			// Prefer exact callback for the *first* frame
+			if ('requestVideoFrameCallback' in this._video) {
+				this._video.requestVideoFrameCallback(() => fireReady());
+			} else {
+				// Fallback: first decoded frame
+				const onLoadedData = () => { this._video.removeEventListener('loadeddata', onLoadedData); fireReady(); };
+				this._video.addEventListener('loadeddata', onLoadedData);
+			}
+
+			// Nudge playback so a frame actually becomes available.
+			// (Muted + user gesture from file input generally allows autoplay.)
+			this._video.play().catch(() => {/* ok if blocked; user can hit Scramble */});
+		});
+
+	}
+
+	currentFrameCanvas() { return this._canvas; }
+	sourceElement() { return this._canvas; }
+
+	onReady(cb) { this._onReady = cb; if (this.ready) cb(); }
+	onFrame(cb) { this._onFrame = cb || (() => {}); }
+
+	_drawCurrentFrame() {
+		try {
+			this._ctx.drawImage(this._video, 0, 0, this.width, this.height);
+		} catch {}
+		this._onFrame();
+	}
+
+	// Prefer precise sync when available
+	_scheduleRVFC() {
+		if (!('requestVideoFrameCallback' in this._video)) return false;
+		const tick = () => {
+			if (!this._playing) return;
+			this._drawCurrentFrame();
+			this._rVFCToken = this._video.requestVideoFrameCallback(tick);
+		};
+		this._rVFCToken = this._video.requestVideoFrameCallback(tick);
+		return true;
+	}
+
+	start() {
+		this._playing = true;
+		// Start drawing frames ASAP
+		if (!this._scheduleRVFC()) {
+			// Fallback: draw on 'timeupdate' + a light RAF sampler
+			const onTimeUpdate = () => { if (this._playing) this._drawCurrentFrame(); };
+			this._video.addEventListener('timeupdate', onTimeUpdate);
+			// One extra RAF every tick to catch high-FPS playback
+			const rafLoop = () => {
+				if (!this._playing) return;
+				this._drawCurrentFrame();
+				requestAnimationFrame(rafLoop);
+			};
+			requestAnimationFrame(rafLoop);
+			this._fallbackCleanup = () => {
+				this._video.removeEventListener('timeupdate', onTimeUpdate);
+			};
 		}
+		// Try to play (user gesture from file selection usually allows this)
+		this._video.play().catch(() => {/* ignored; user can click Scramble later */});
+	}
 
-		class VideoFrameSource {
-			constructor(file) {
-				this.ready = false;
-				this.animated = true;
-				this.width = 1;
-				this.height = 1;
+	stop() {
+		this._playing = false;
+		try { this._video.pause(); } catch {}
+		if (this._rVFCToken && 'cancelVideoFrameCallback' in this._video) {
+			try { this._video.cancelVideoFrameCallback(this._rVFCToken); } catch {}
+		}
+		if (this._fallbackCleanup) { try { this._fallbackCleanup(); } catch {} }
+		this._rVFCToken = null;
+	}
 
-				this._canvas = document.createElement('canvas');
-				this._ctx = this._canvas.getContext('2d', { willReadFrequently: true });
-				this._onFrame = () => {};
-				this._onReady = null;
+	destroy() {
+		this.stop();
+		if (this._objectURL) URL.revokeObjectURL(this._objectURL);
+		this._objectURL = null;
+		this._video.src = '';
+	}
 
-				this._objectURL = URL.createObjectURL(file);
-				this._video = document.createElement('video');
-				this._video.src = this._objectURL;
-				this._video.loop = true;
-				this._video.playsInline = true;
-				this._video.preload = 'auto';
+	// Audio control surface
+	hasAudio() { return this._hasAudio; }
+	onAudioStatus(cb) { this._onAudioStatus = cb || (() => {}); if (this._hasAudio) cb(true); }
+	setMuted(m) { try { this._video.muted = !!m; } catch {} }
+	setVolume(v) { try { this._video.volume = clamp(v, 0, 1); } catch {} }
+}
 
-				this._video.muted = !audioToggle.checked; // audio off by default, but persists between videos
-				this._hasAudio = false;
-				this._onAudioStatus = () => {};
 
-				this._rVFCToken = null;
-				this._playing = false;
+/* ================================
+Load & Decode (creates a FrameSource)
+================================ */
+async function loadFromFile(file) {
+	clearLog();
+	stopAnimationLoop();
+	try { frameSource?.destroy?.(); } catch {}
 
-				const detectHasAudio = () => {
-					const v = this._video;
-					// A mix of vendor signals; any true implies audio present.
-					const has =
-						!!(v.mozHasAudio) ||
-						!!(v.webkitAudioDecodedByteCount > 0) ||
-						!!(v.audioTracks && v.audioTracks.length > 0);
-					if (has && !this._hasAudio) {
-						this._hasAudio = true;
-						this._onAudioStatus(true);
-					}
-				};
+	puzzleSolved = false;
+	scrambleBtn.disabled = true;
+	frameSource = null;
 
-				this._video.addEventListener('loadedmetadata', () => {
-					this.width  = Math.max(1, this._video.videoWidth | 0);
-					this.height = Math.max(1, this._video.videoHeight | 0);
-					this._canvas.width = this.width;
-					this._canvas.height = this.height;
+	log('onSelectFile', { name: file.name, size: file.size, type: file.type });
 
-					// Initial probe - some engines only populate after play/timeupdate
-					detectHasAudio();
-					// Keep probing briefly as playback begins (helps Safari/WebKit)
-					const onTU = () => detectHasAudio();
-					this._video.addEventListener('timeupdate', onTU, { once: true });
+	if (file.type === 'video/webm' || file.type.startsWith('video/')) {
+		try {
+			frameSource = new VideoFrameSource(file);
+			frameSource.onReady(() => {
+				imageAspectRatio = frameSource.width / frameSource.height;
+				buildDifficultyOptions();
+				scrambleBtn.disabled = false;
 
-					const fireReady = () => {
-						if (this.ready) return;
-						// draw once so the canvas is non-empty
-						this._drawCurrentFrame();
-						this.ready = true;
-						if (this._onReady) this._onReady();
-					};
+				createPuzzle(); // build initial pieces from the first video frame
 
-					// Prefer exact callback for the *first* frame
-					if ('requestVideoFrameCallback' in this._video) {
-						this._video.requestVideoFrameCallback(() => fireReady());
-					} else {
-						// Fallback: first decoded frame
-						const onLoadedData = () => { this._video.removeEventListener('loadeddata', onLoadedData); fireReady(); };
-						this._video.addEventListener('loadeddata', onLoadedData);
-					}
-
-					// Nudge playback so a frame actually becomes available.
-					// (Muted + user gesture from file input generally allows autoplay.)
-					this._video.play().catch(() => {/* ok if blocked; user can hit Scramble */});
+				// Every time the video advances, repaint from the latest frame.
+				frameSource.onFrame(() => {
+					if (!animRunning || !frameSource?.animated) return;
+					rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
+					repaintAllPiecesFromSlice();
 				});
 
-			}
+				startAnimationLoop(); // flip animRunning=true (same as GIF path)
+				frameSource.start();
+			});
 
-			currentFrameCanvas() { return this._canvas; }
-			sourceElement() { return this._canvas; }
+			// Audio
+			frameSource.onReady(() => {
+				imageAspectRatio = frameSource.width / frameSource.height;
+				buildDifficultyOptions();
+				scrambleBtn.disabled = false;
 
-			onReady(cb) { this._onReady = cb; if (this.ready) cb(); }
-			onFrame(cb) { this._onFrame = cb || (() => {}); }
+				createPuzzle();
 
-			_drawCurrentFrame() {
-				try {
-					this._ctx.drawImage(this._video, 0, 0, this.width, this.height);
-				} catch {}
-				this._onFrame();
-			}
+				// Repaint on video frame as you already do...
+				frameSource.onFrame(() => {
+					if (!animRunning || !frameSource?.animated) return;
+					rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
+					repaintAllPiecesFromSlice();
+				});
 
-			// Prefer precise sync when available
-			_scheduleRVFC() {
-				if (!('requestVideoFrameCallback' in this._video)) return false;
-				const tick = () => {
-					if (!this._playing) return;
-					this._drawCurrentFrame();
-					this._rVFCToken = this._video.requestVideoFrameCallback(tick);
+				// Expose audio UI if audio is present
+				const updateAudioUI = () => {
+					const show = !!frameSource.hasAudio?.();
+					audioControls.style.display = show ? 'flex' : '';
 				};
-				this._rVFCToken = this._video.requestVideoFrameCallback(tick);
-				return true;
-			}
+				frameSource.onAudioStatus(updateAudioUI);
+				updateAudioUI(); // in case it’s already known
 
-			start() {
-				this._playing = true;
-				// Start drawing frames ASAP
-				if (!this._scheduleRVFC()) {
-					// Fallback: draw on 'timeupdate' + a light RAF sampler
-					const onTimeUpdate = () => { if (this._playing) this._drawCurrentFrame(); };
-					this._video.addEventListener('timeupdate', onTimeUpdate);
-					// One extra RAF every tick to catch high-FPS playback
-					const rafLoop = () => {
-						if (!this._playing) return;
-						this._drawCurrentFrame();
-						requestAnimationFrame(rafLoop);
-					};
-					requestAnimationFrame(rafLoop);
-					this._fallbackCleanup = () => {
-						this._video.removeEventListener('timeupdate', onTimeUpdate);
-					};
-				}
-				// Try to play (user gesture from file selection usually allows this)
-				this._video.play().catch(() => {/* ignored; user can click Scramble later */});
-			}
+				frameSource.setMuted(!audioToggle.checked);
+				frameSource.setVolume(parseFloat(audioVolume.value));
 
-			stop() {
-				this._playing = false;
-				try { this._video.pause(); } catch {}
-				if (this._rVFCToken && 'cancelVideoFrameCallback' in this._video) {
-					try { this._video.cancelVideoFrameCallback(this._rVFCToken); } catch {}
-				}
-				if (this._fallbackCleanup) { try { this._fallbackCleanup(); } catch {} }
-				this._rVFCToken = null;
-			}
-
-			destroy() {
-				this.stop();
-				if (this._objectURL) URL.revokeObjectURL(this._objectURL);
-				this._objectURL = null;
-				this._video.src = '';
-			}
-
-			// Audio control surface
-			hasAudio() { return this._hasAudio; }
-			onAudioStatus(cb) { this._onAudioStatus = cb || (() => {}); if (this._hasAudio) cb(true); }
-			setMuted(m) { try { this._video.muted = !!m; } catch {} }
-			setVolume(v) { try { this._video.volume = clamp(v, 0, 1); } catch {} }
+				startAnimationLoop();
+				frameSource.start();
+			});
+		} catch (err) {
+			log('VIDEO DECODE ERROR', String(err));
+			alert('Failed to decode video.');
+			return;
 		}
+		return; // handled as video path
+	}
 
+	if (file.type === 'image/gif') {
+		try {
+			frameSource = new GifFrameSource(file);
+			frameSource.onReady(() => {
+				imageAspectRatio = frameSource.width / frameSource.height;
+				buildDifficultyOptions();
+				scrambleBtn.disabled = false;
+			createPuzzle(); // builds initial pieces from frame 0
 
-		/* ================================
-		Load & Decode (creates a FrameSource)
-		================================ */
-		async function loadFromFile(file) {
-			clearLog();
-			stopAnimationLoop();
-			try { frameSource?.destroy?.(); } catch {}
+			// Every time the GIF advances, rebuild the padded source and repaint pieces.
+				frameSource.onFrame(() => {
+					if (!animRunning || !frameSource?.animated) return;
+					rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
+					repaintAllPiecesFromSlice();
+				});
 
-			puzzleSolved = false;
-			scrambleBtn.disabled = true;
-			frameSource = null;
-
-			log('onSelectFile', { name: file.name, size: file.size, type: file.type });
-
-			if (file.type === 'video/webm' || file.type.startsWith('video/')) {
-				try {
-					frameSource = new VideoFrameSource(file);
-					frameSource.onReady(() => {
-						imageAspectRatio = frameSource.width / frameSource.height;
-						buildDifficultyOptions();
-						scrambleBtn.disabled = false;
-
-						createPuzzle(); // build initial pieces from the first video frame
-
-						// Every time the video advances, repaint from the latest frame.
-						frameSource.onFrame(() => {
-							if (!animRunning || !frameSource?.animated) return;
-							rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
-							repaintAllPiecesFromSlice();
-						});
-
-						startAnimationLoop(); // flip animRunning=true (same as GIF path)
-						frameSource.start();
-					});
-
-					// Audio
-					frameSource.onReady(() => {
-						imageAspectRatio = frameSource.width / frameSource.height;
-						buildDifficultyOptions();
-						scrambleBtn.disabled = false;
-
-						createPuzzle();
-
-						// Repaint on video frame as you already do...
-						frameSource.onFrame(() => {
-							if (!animRunning || !frameSource?.animated) return;
-							rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
-							repaintAllPiecesFromSlice();
-						});
-
-						// Expose audio UI if audio is present
-						const updateAudioUI = () => {
-							const show = !!frameSource.hasAudio?.();
-							audioControls.style.display = show ? 'flex' : 'none';
-						};
-						frameSource.onAudioStatus(updateAudioUI);
-						updateAudioUI(); // in case it’s already known
-
-						frameSource.setMuted(!audioToggle.checked);
-						frameSource.setVolume(parseFloat(audioVolume.value));
-
-						startAnimationLoop();
-						frameSource.start();
-					});
-				} catch (err) {
-					log('VIDEO DECODE ERROR', String(err));
-					alert('Failed to decode video.');
-					return;
-				}
-				return; // handled as video path
-			}
-
-			if (file.type === 'image/gif') {
-				try {
-					frameSource = new GifFrameSource(file);
-					frameSource.onReady(() => {
-						imageAspectRatio = frameSource.width / frameSource.height;
-						buildDifficultyOptions();
-						scrambleBtn.disabled = false;
-					createPuzzle(); // builds initial pieces from frame 0
-
-					// Every time the GIF advances, rebuild the padded source and repaint pieces.
-						frameSource.onFrame(() => {
-							if (!animRunning || !frameSource?.animated) return;
-							rebuildSliceSourceFromCurrentFrame(puzzleSizeX, puzzleSizeY);
-							repaintAllPiecesFromSlice();
-						});
-
-					startAnimationLoop(); // just flips animRunning=true and lets frame callbacks do the work
-						frameSource.start();
-					});
-				} catch (err) {
-					log('GIF DECODE ERROR', String(err));
-					alert('Failed to decode GIF.');
-					return;
-				}
-				return; // handled as GIF path
-			}
-
-			try {
-				let srcBitmap = null;
-				let srcImage = null;
-
-				if (USE_BITMAP && window.createImageBitmap) {
-					srcBitmap = await createImageBitmap(file, {
-						imageOrientation: 'from-image',
-						premultiplyAlpha: 'premultiply',
-						colorSpaceConversion: 'default'
-					});
-					imageAspectRatio = srcBitmap.width / srcBitmap.height;
-					log('createImageBitmap(file) OK', { w: srcBitmap.width, h: srcBitmap.height });
-					frameSource = new StaticImageSource(srcBitmap.width, srcBitmap.height, srcBitmap);
-				} else {
-					const dataURL = await fileToDataURL(file);
-					srcImage = await loadHTMLImage(dataURL);
-					imageAspectRatio = srcImage.naturalWidth / srcImage.naturalHeight;
-					log('HTMLImageElement loaded', { w: srcImage.naturalWidth, h: srcImage.naturalHeight });
-					frameSource = new StaticImageSource(srcImage.naturalWidth, srcImage.naturalHeight, srcImage);
-				}
-			} catch (err) {
-				log('DECODE ERROR', String(err));
-				alert('Failed to decode image.');
-				return;
-			}
-
-			buildDifficultyOptions();
-			scrambleBtn.disabled = false;
-			createPuzzle();
+			startAnimationLoop(); // just flips animRunning=true and lets frame callbacks do the work
+				frameSource.start();
+			});
+		} catch (err) {
+			log('GIF DECODE ERROR', String(err));
+			alert('Failed to decode GIF.');
+			return;
 		}
+		return; // handled as GIF path
+	}
 
-		/* ================================
-		Padded Source Builder
-		================================ */
-		function buildPaddedSource(gridX, gridY, token) {
-			const srcEl = frameSource.sourceElement ? frameSource.sourceElement()
-													: frameSource.currentFrameCanvas();
-			const srcW = srcEl.width || srcEl.naturalWidth;
-			const srcH = srcEl.height || srcEl.naturalHeight;
+	try {
+		let srcBitmap = null;
+		let srcImage = null;
 
-			const paddedW = Math.ceil(srcW / gridX) * gridX;
-			const paddedH = Math.ceil(srcH / gridY) * gridY;
+		if (USE_BITMAP && window.createImageBitmap) {
+			srcBitmap = await createImageBitmap(file, {
+				imageOrientation: 'from-image',
+				premultiplyAlpha: 'premultiply',
+				colorSpaceConversion: 'default'
+			});
+			imageAspectRatio = srcBitmap.width / srcBitmap.height;
+			log('createImageBitmap(file) OK', { w: srcBitmap.width, h: srcBitmap.height });
+			frameSource = new StaticImageSource(srcBitmap.width, srcBitmap.height, srcBitmap);
+		} else {
+			const dataURL = await fileToDataURL(file);
+			srcImage = await loadHTMLImage(dataURL);
+			imageAspectRatio = srcImage.naturalWidth / srcImage.naturalHeight;
+			log('HTMLImageElement loaded', { w: srcImage.naturalWidth, h: srcImage.naturalHeight });
+			frameSource = new StaticImageSource(srcImage.naturalWidth, srcImage.naturalHeight, srcImage);
+		}
+	} catch (err) {
+		log('DECODE ERROR', String(err));
+		alert('Failed to decode image.');
+		return;
+	}
 
-			const canvas = document.createElement('canvas');
-			canvas.width = paddedW;
-			canvas.height = paddedH;
+	buildDifficultyOptions();
+	scrambleBtn.disabled = false;
+	createPuzzle();
+}
 
-			const ctx = canvas.getContext('2d', { willReadFrequently: true });
+/* ================================
+Padded Source Builder
+================================ */
+function buildPaddedSource(gridX, gridY, token) {
+	const srcEl = frameSource.sourceElement ? frameSource.sourceElement()
+											: frameSource.currentFrameCanvas();
+	const srcW = srcEl.width || srcEl.naturalWidth;
+	const srcH = srcEl.height || srcEl.naturalHeight;
 
-			// Canary magenta background for debug.
-			if (DEBUG_ENABLED) {
-				ctx.fillStyle = '#ff00ff88';
-				ctx.fillRect(0, 0, paddedW, paddedH);
-			}
+	const paddedW = Math.ceil(srcW / gridX) * gridX;
+	const paddedH = Math.ceil(srcH / gridY) * gridY;
 
-			const offsetX = Math.floor((paddedW - srcW) / 2);
-			const offsetY = Math.floor((paddedH - srcH) / 2);
+	const canvas = document.createElement('canvas');
+	canvas.width = paddedW;
+	canvas.height = paddedH;
 
-			let drew = attemptDrawTo(ctx, srcEl, offsetX, offsetY, srcW, srcH, 'source-over');
+	const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-			if (!drew && USE_COMPOSITE_COPY) {
-				drew = attemptDrawTo(ctx, srcEl, offsetX, offsetY, srcW, srcH, 'copy');
-			}
+	// Canary magenta background for debug.
+	if (DEBUG_ENABLED) {
+		ctx.fillStyle = '#ff00ff88';
+		ctx.fillRect(0, 0, paddedW, paddedH);
+	}
 
-			// Crosshair (debug)
-			if (DEBUG_ENABLED) {
-				ctx.save();
-				ctx.strokeStyle = '#ff0000cc';
-				ctx.beginPath();
-				ctx.moveTo(offsetX, offsetY - 6);
-				ctx.lineTo(offsetX, offsetY + 6);
-				ctx.moveTo(offsetX - 6, offsetY);
-				ctx.lineTo(offsetX + 6, offsetY);
-				ctx.stroke();
-				ctx.restore();
-			}
+	const offsetX = Math.floor((paddedW - srcW) / 2);
+	const offsetY = Math.floor((paddedH - srcH) / 2);
 
-			let aTL = 0, aMid = 0;
-			try {
-				const tl = ctx.getImageData(Math.max(0, offsetX), Math.max(0, offsetY), 1, 1).data;
-				const mid = ctx.getImageData(paddedW / 2, paddedH / 2, 1, 1).data;
-				aTL = tl[3];
-				aMid = mid[3];
-				log('padded-samples', { TL: Array.from(tl), MID: Array.from(mid), sum: aTL + aMid });
-			} catch (err) {
-				log('getImageData ERROR', String(err));
-			}
+	let drew = attemptDrawTo(ctx, srcEl, offsetX, offsetY, srcW, srcH, 'source-over');
 
-			if (DEBUG_ENABLED) {
-				const dbg = debugPaddedCanvas;
-				dbg.width = paddedW;
-				dbg.height = paddedH;
-				const dctx = dbg.getContext('2d');
-				dctx.clearRect(0, 0, paddedW, paddedH);
-				dctx.drawImage(canvas, 0, 0);
-				debugMetricsEl.textContent =
+	if (!drew && USE_COMPOSITE_COPY) {
+		drew = attemptDrawTo(ctx, srcEl, offsetX, offsetY, srcW, srcH, 'copy');
+	}
+
+	// Crosshair (debug)
+	if (DEBUG_ENABLED) {
+		ctx.save();
+		ctx.strokeStyle = '#ff0000cc';
+		ctx.beginPath();
+		ctx.moveTo(offsetX, offsetY - 6);
+		ctx.lineTo(offsetX, offsetY + 6);
+		ctx.moveTo(offsetX - 6, offsetY);
+		ctx.lineTo(offsetX + 6, offsetY);
+		ctx.stroke();
+		ctx.restore();
+	}
+
+	let aTL = 0, aMid = 0;
+	try {
+		const tl = ctx.getImageData(Math.max(0, offsetX), Math.max(0, offsetY), 1, 1).data;
+		const mid = ctx.getImageData(paddedW / 2, paddedH / 2, 1, 1).data;
+		aTL = tl[3];
+		aMid = mid[3];
+		log('padded-samples', { TL: Array.from(tl), MID: Array.from(mid), sum: aTL + aMid });
+	} catch (err) {
+		log('getImageData ERROR', String(err));
+	}
+
+	if (DEBUG_ENABLED) {
+		const dbg = debugPaddedCanvas;
+		dbg.width = paddedW;
+		dbg.height = paddedH;
+		const dctx = dbg.getContext('2d');
+		dctx.clearRect(0, 0, paddedW, paddedH);
+		dctx.drawImage(canvas, 0, 0);
+		debugMetricsEl.textContent =
 `Token: ${token}
 Src: ${srcW}×${srcH}
 Padded: ${paddedW}×${paddedH}
@@ -1189,670 +1222,670 @@ Samples: TL a=${aTL} MID a=${aMid} sum=${aTL + aMid}
 Path: ${frameSource.animated ? 'Animated' : 'Static'}
 DrawOK: ${drew ? 'yes' : 'NO (used fallback)'}
 `;
-			}
+	}
 
-			return { canvas, width: paddedW, height: paddedH };
-		}
+	return { canvas, width: paddedW, height: paddedH };
+}
 
-		function rebuildSliceSourceFromCurrentFrame(gridX, gridY) {
-			const srcEl = frameSource.sourceElement ? frameSource.sourceElement()
-				: frameSource.currentFrameCanvas();
-			const srcW = srcEl.width || srcEl.naturalWidth;
-			const srcH = srcEl.height || srcEl.naturalHeight;
+function rebuildSliceSourceFromCurrentFrame(gridX, gridY) {
+	const srcEl = frameSource.sourceElement ? frameSource.sourceElement()
+		: frameSource.currentFrameCanvas();
+	const srcW = srcEl.width || srcEl.naturalWidth;
+	const srcH = srcEl.height || srcEl.naturalHeight;
 
-			const paddedW = Math.ceil(srcW / gridX) * gridX;
-			const paddedH = Math.ceil(srcH / gridY) * gridY;
+	const paddedW = Math.ceil(srcW / gridX) * gridX;
+	const paddedH = Math.ceil(srcH / gridY) * gridY;
 
-			if (!paddedReuseCanvas) paddedReuseCanvas = document.createElement('canvas');
-			if (paddedReuseCanvas.width !== paddedW || paddedReuseCanvas.height !== paddedH) {
-				paddedReuseCanvas.width = paddedW;
-				paddedReuseCanvas.height = paddedH;
-			}
+	if (!paddedReuseCanvas) paddedReuseCanvas = document.createElement('canvas');
+	if (paddedReuseCanvas.width !== paddedW || paddedReuseCanvas.height !== paddedH) {
+		paddedReuseCanvas.width = paddedW;
+		paddedReuseCanvas.height = paddedH;
+	}
 
-			const ctx = paddedReuseCanvas.getContext('2d', { willReadFrequently: true });
-			ctx.clearRect(0, 0, paddedW, paddedH);
+	const ctx = paddedReuseCanvas.getContext('2d', { willReadFrequently: true });
+	ctx.clearRect(0, 0, paddedW, paddedH);
 
-			const offsetX = Math.floor((paddedW - srcW) / 2);
-			const offsetY = Math.floor((paddedH - srcH) / 2);
-			ctx.drawImage(srcEl, offsetX, offsetY, srcW, srcH);
+	const offsetX = Math.floor((paddedW - srcW) / 2);
+	const offsetY = Math.floor((paddedH - srcH) / 2);
+	ctx.drawImage(srcEl, offsetX, offsetY, srcW, srcH);
 
-			sliceSourceCanvas = paddedReuseCanvas;
-			sliceSourceW = paddedW;
-			sliceSourceH = paddedH;
-		}
+	sliceSourceCanvas = paddedReuseCanvas;
+	sliceSourceW = paddedW;
+	sliceSourceH = paddedH;
+}
 
-		function attemptDrawTo(ctx, srcDrawable, x, y, w, h, compOp = 'source-over') {
-			ctx.save();
-			ctx.globalCompositeOperation = compOp;
-			ctx.clearRect(x, y, w, h);
-			let drew = false;
+function attemptDrawTo(ctx, srcDrawable, x, y, w, h, compOp = 'source-over') {
+	ctx.save();
+	ctx.globalCompositeOperation = compOp;
+	ctx.clearRect(x, y, w, h);
+	let drew = false;
 
-			try {
-				ctx.drawImage(srcDrawable, x, y, w, h);
-			} catch (err) {
-				log('attemptDrawTo ERROR', { compOp, err: String(err) });
-			}
+	try {
+		ctx.drawImage(srcDrawable, x, y, w, h);
+	} catch (err) {
+		log('attemptDrawTo ERROR', { compOp, err: String(err) });
+	}
 
-			try {
-				const mid = ctx.getImageData((x + (w / 2))|0, (y + (h / 2))|0, 1, 1).data;
-				drew = mid[3] > 0;
-			} catch (err) {
-				log('probe ERROR', String(err));
-			}
+	try {
+		const mid = ctx.getImageData((x + (w / 2))|0, (y + (h / 2))|0, 1, 1).data;
+		drew = mid[3] > 0;
+	} catch (err) {
+		log('probe ERROR', String(err));
+	}
 
-			ctx.restore();
+	ctx.restore();
 
-			log('attemptDrawTo', { compOp, drew });
-			return drew;
-		}
+	log('attemptDrawTo', { compOp, drew });
+	return drew;
+}
 
-		/* ================================
-		Build / Render
-		================================ */
-		function createPuzzle() {
-			const myToken = ++buildToken;
-			log('createPuzzle start', { token: myToken });
+/* ================================
+Build / Render
+================================ */
+function createPuzzle() {
+	const myToken = ++buildToken;
+	log('createPuzzle start', { token: myToken });
 
-			pieceGroups = [];
-			puzzleSolved = false;
+	pieceGroups = [];
+	puzzleSolved = false;
 
-			const container = puzzleBoard.parentElement;
-			const containerWidth = container.clientWidth;
-			const containerHeight = container.clientHeight;
+	const container = puzzleBoard.parentElement;
+	const containerWidth = container.clientWidth;
+	const containerHeight = container.clientHeight;
 
-			log('container size', { containerWidth, containerHeight });
+	log('container size', { containerWidth, containerHeight });
 
-			if (containerWidth < 10 || containerHeight < 10) {
-				log('container too small, reflow defer');
-				requestAnimationFrame(() => { if (myToken === buildToken) createPuzzle(); });
-				return;
-			}
+	if (containerWidth < 10 || containerHeight < 10) {
+		log('container too small, reflow defer');
+		requestAnimationFrame(() => { if (myToken === buildToken) createPuzzle(); });
+		return;
+	}
 
-			puzzleBoard.innerHTML = '';
+	puzzleBoard.innerHTML = '';
 
-			assemblyArea = document.createElement('div');
-			assemblyArea.id = 'assembly-area';
-			puzzleBoard.appendChild(assemblyArea);
-			puzzleBoard.appendChild(boardPlaceholder);
-			puzzleBoard.appendChild(winMessage);
+	assemblyArea = document.createElement('div');
+	assemblyArea.id = 'assembly-area';
+	puzzleBoard.appendChild(assemblyArea);
+	puzzleBoard.appendChild(boardPlaceholder);
+	puzzleBoard.appendChild(winMessage);
 
-			winMessage.classList.remove('show');
-			boardPlaceholder.style.display = 'none';
+	winMessage.classList.remove('show');
+	boardPlaceholder.style.display = 'none';
 
-			const padded = buildPaddedSource(puzzleSizeX, puzzleSizeY, myToken);
+	const padded = buildPaddedSource(puzzleSizeX, puzzleSizeY, myToken);
+	if (myToken !== buildToken) {
+		log('stale build after padded; abort', { token: myToken });
+		return;
+	}
+
+	if (frameSource.animated) {
+		// For GIFs, reuse a single canvas we’ll continuously overwrite on each frame tick.
+		if (!paddedReuseCanvas) paddedReuseCanvas = document.createElement('canvas');
+		paddedReuseCanvas.width = padded.width;
+		paddedReuseCanvas.height = padded.height;
+		const ctx = paddedReuseCanvas.getContext('2d', { willReadFrequently: true });
+		ctx.clearRect(0, 0, padded.width, padded.height);
+		// Seed from this build’s padded snapshot (current GIF frame)
+		ctx.drawImage(padded.canvas, 0, 0);
+		sliceSourceCanvas = paddedReuseCanvas;
+		sliceSourceW = paddedReuseCanvas.width;
+		sliceSourceH = paddedReuseCanvas.height;
+	} else {
+		// Static images: just use the padded canvas directly.
+		sliceSourceCanvas = padded.canvas;
+		sliceSourceW = padded.width;
+		sliceSourceH = padded.height;
+	}
+
+	const paddedAspect = sliceSourceW / sliceSourceH;
+
+	// Give more space: let assembly take up to 90% of container area
+	let assemblyWidth = Math.floor(containerWidth * (isMobileNarrow?.() ? 0.92 : 0.7));
+	let assemblyHeight = Math.round(assemblyWidth / paddedAspect);
+
+	if (assemblyHeight > Math.floor(containerHeight * 0.9)) {
+		assemblyHeight = Math.floor(containerHeight * 0.9);
+		assemblyWidth = Math.round(assemblyHeight * paddedAspect);
+	}
+
+	const boardWidth = containerWidth;
+	const boardHeight = containerHeight;
+
+	puzzleBoard.style.width = `${boardWidth}px`;
+	puzzleBoard.style.height = `${boardHeight}px`;
+
+	pieceWidth  = Math.max(1, Math.floor(assemblyWidth  / puzzleSizeX));
+	pieceHeight = Math.max(1, Math.floor(assemblyHeight / puzzleSizeY));
+	assemblyWidth  = pieceWidth  * puzzleSizeX;
+	assemblyHeight = pieceHeight * puzzleSizeY;
+
+	const assemblyX = (boardWidth - assemblyWidth) / 2;
+	const assemblyY = (boardHeight - assemblyHeight) / 2;
+
+	assemblyArea.style.width = `${assemblyWidth}px`;
+	assemblyArea.style.height = `${assemblyHeight}px`;
+	assemblyArea.style.left = `${assemblyX}px`;
+	assemblyArea.style.top = `${assemblyY}px`;
+
+	log('layout', { assemblyWidth, assemblyHeight, pieceWidth, pieceHeight });
+
+	let sw = sliceSourceW / puzzleSizeX;
+	let sh = sliceSourceH / puzzleSizeY;
+	log('source-slice', { sw, sh });
+
+	for (let y = 0; y < puzzleSizeY; y++) {
+		for (let x = 0; x < puzzleSizeX; x++) {
 			if (myToken !== buildToken) {
-				log('stale build after padded; abort', { token: myToken });
+				log('stale build mid-loop; abort', { token: myToken });
 				return;
 			}
-
-			if (frameSource.animated) {
-				// For GIFs, reuse a single canvas we’ll continuously overwrite on each frame tick.
-				if (!paddedReuseCanvas) paddedReuseCanvas = document.createElement('canvas');
-				paddedReuseCanvas.width = padded.width;
-				paddedReuseCanvas.height = padded.height;
-				const ctx = paddedReuseCanvas.getContext('2d', { willReadFrequently: true });
-				ctx.clearRect(0, 0, padded.width, padded.height);
-				// Seed from this build’s padded snapshot (current GIF frame)
-				ctx.drawImage(padded.canvas, 0, 0);
-				sliceSourceCanvas = paddedReuseCanvas;
-				sliceSourceW = paddedReuseCanvas.width;
-				sliceSourceH = paddedReuseCanvas.height;
-			} else {
-				// Static images: just use the padded canvas directly.
-				sliceSourceCanvas = padded.canvas;
-				sliceSourceW = padded.width;
-				sliceSourceH = padded.height;
-			}
-
-			const paddedAspect = sliceSourceW / sliceSourceH;
-
-			// Give more space: let assembly take up to 90% of container area
-			let assemblyWidth = Math.floor(containerWidth * (isMobileNarrow?.() ? 0.92 : 0.7));
-			let assemblyHeight = Math.round(assemblyWidth / paddedAspect);
-
-			if (assemblyHeight > Math.floor(containerHeight * 0.9)) {
-				assemblyHeight = Math.floor(containerHeight * 0.9);
-				assemblyWidth = Math.round(assemblyHeight * paddedAspect);
-			}
-
-			const boardWidth = containerWidth;
-			const boardHeight = containerHeight;
-
-			puzzleBoard.style.width = `${boardWidth}px`;
-			puzzleBoard.style.height = `${boardHeight}px`;
-
-			pieceWidth  = Math.max(1, Math.floor(assemblyWidth  / puzzleSizeX));
-			pieceHeight = Math.max(1, Math.floor(assemblyHeight / puzzleSizeY));
-			assemblyWidth  = pieceWidth  * puzzleSizeX;
-			assemblyHeight = pieceHeight * puzzleSizeY;
-
-			const assemblyX = (boardWidth - assemblyWidth) / 2;
-			const assemblyY = (boardHeight - assemblyHeight) / 2;
-
-			assemblyArea.style.width = `${assemblyWidth}px`;
-			assemblyArea.style.height = `${assemblyHeight}px`;
-			assemblyArea.style.left = `${assemblyX}px`;
-			assemblyArea.style.top = `${assemblyY}px`;
-
-			log('layout', { assemblyWidth, assemblyHeight, pieceWidth, pieceHeight });
-
-			let sw = sliceSourceW / puzzleSizeX;
-			let sh = sliceSourceH / puzzleSizeY;
-			log('source-slice', { sw, sh });
-
-			for (let y = 0; y < puzzleSizeY; y++) {
-				for (let x = 0; x < puzzleSizeX; x++) {
-					if (myToken !== buildToken) {
-						log('stale build mid-loop; abort', { token: myToken });
-						return;
-					}
-					const piece = createPieceCanvas(x, y, sw, sh);
-					const group = createPieceGroup(piece);
-					placeGroupRandomly(
-						group,
-						boardWidth,
-						boardHeight,
-						{ x: assemblyX, y: assemblyY, width: assemblyWidth, height: assemblyHeight }
-					);
-					puzzleBoard.appendChild(group.element);
-					pieceGroups.push(group);
-				}
-			}
-
-			log('createPuzzle done', { token: myToken, pieces: pieceGroups.length });
+			const piece = createPieceCanvas(x, y, sw, sh);
+			const group = createPieceGroup(piece);
+			placeGroupRandomly(
+				group,
+				boardWidth,
+				boardHeight,
+				{ x: assemblyX, y: assemblyY, width: assemblyWidth, height: assemblyHeight }
+			);
+			puzzleBoard.appendChild(group.element);
+			pieceGroups.push(group);
 		}
+	}
 
-		function relayoutPuzzlePreserveGroups() {
-			if (!assemblyArea || !pieceGroups.length) return;
+	log('createPuzzle done', { token: myToken, pieces: pieceGroups.length });
+}
 
-			// 1) Recompute layout from container just like in createPuzzle()
-			const container = puzzleBoard.parentElement;
-			const containerWidth = container.clientWidth;
-			const containerHeight = container.clientHeight;
+function relayoutPuzzlePreserveGroups() {
+	if (!assemblyArea || !pieceGroups.length) return;
 
-			if (containerWidth < 10 || containerHeight < 10) return;
+	// 1) Recompute layout from container just like in createPuzzle()
+	const container = puzzleBoard.parentElement;
+	const containerWidth = container.clientWidth;
+	const containerHeight = container.clientHeight;
 
-			const paddedAspect = sliceSourceW / sliceSourceH;
+	if (containerWidth < 10 || containerHeight < 10) return;
 
-			// Board fills container
-			const boardWidth = containerWidth;
-			const boardHeight = containerHeight;
-			puzzleBoard.style.width = `${boardWidth}px`;
-			puzzleBoard.style.height = `${boardHeight}px`;
+	const paddedAspect = sliceSourceW / sliceSourceH;
 
-			// Assembly area sizing (same policy as createPuzzle: ~70% width, <=90% height)
-			let assemblyWidth = Math.floor(boardWidth * 0.7);
-			let assemblyHeight = Math.round(assemblyWidth / paddedAspect);
-			if (assemblyHeight > Math.floor(boardHeight * 0.9)) {
-				assemblyHeight = Math.floor(boardHeight * 0.9);
-				assemblyWidth = Math.round(assemblyHeight * paddedAspect);
-			}
+	// Board fills container
+	const boardWidth = containerWidth;
+	const boardHeight = containerHeight;
+	puzzleBoard.style.width = `${boardWidth}px`;
+	puzzleBoard.style.height = `${boardHeight}px`;
 
-			// Recompute piece size from the assembly grid
-			pieceWidth = Math.max(1, Math.floor(assemblyWidth / puzzleSizeX));
-			pieceHeight = Math.max(1, Math.floor(assemblyHeight / puzzleSizeY));
-			assemblyWidth = pieceWidth * puzzleSizeX;
-			assemblyHeight = pieceHeight * puzzleSizeY;
+	// Assembly area sizing (same policy as createPuzzle: ~70% width, <=90% height)
+	let assemblyWidth = Math.floor(boardWidth * 0.7);
+	let assemblyHeight = Math.round(assemblyWidth / paddedAspect);
+	if (assemblyHeight > Math.floor(boardHeight * 0.9)) {
+		assemblyHeight = Math.floor(boardHeight * 0.9);
+		assemblyWidth = Math.round(assemblyHeight * paddedAspect);
+	}
 
-			const assemblyX = (boardWidth - assemblyWidth) / 2;
-			const assemblyY = (boardHeight - assemblyHeight) / 2;
+	// Recompute piece size from the assembly grid
+	pieceWidth = Math.max(1, Math.floor(assemblyWidth / puzzleSizeX));
+	pieceHeight = Math.max(1, Math.floor(assemblyHeight / puzzleSizeY));
+	assemblyWidth = pieceWidth * puzzleSizeX;
+	assemblyHeight = pieceHeight * puzzleSizeY;
 
-			// Update assemblyArea rect
-			assemblyArea.style.width = `${assemblyWidth}px`;
-			assemblyArea.style.height = `${assemblyHeight}px`;
-			assemblyArea.style.left = `${assemblyX}px`;
-			assemblyArea.style.top = `${assemblyY}px`;
+	const assemblyX = (boardWidth - assemblyWidth) / 2;
+	const assemblyY = (boardHeight - assemblyHeight) / 2;
 
-			// 2) Resize every piece canvas and reposition inside its current group
-			const sw = sliceSourceW / puzzleSizeX;
-			const sh = sliceSourceH / puzzleSizeY;
+	// Update assemblyArea rect
+	assemblyArea.style.width = `${assemblyWidth}px`;
+	assemblyArea.style.height = `${assemblyHeight}px`;
+	assemblyArea.style.left = `${assemblyX}px`;
+	assemblyArea.style.top = `${assemblyY}px`;
 
-			for (const group of pieceGroups) {
-				// Resize each piece & reposition relative to group's min grid cell
-				for (const piece of group.pieces) {
-					const gx = parseInt(piece.dataset.correctX, 10);
-					const gy = parseInt(piece.dataset.correctY, 10);
+	// 2) Resize every piece canvas and reposition inside its current group
+	const sw = sliceSourceW / puzzleSizeX;
+	const sh = sliceSourceH / puzzleSizeY;
 
-					// Resize canvas pixels and CSS size
-					piece.width = Math.max(1, pieceWidth);
-					piece.height = Math.max(1, pieceHeight);
-					piece.style.width = `${pieceWidth}px`;
-					piece.style.height = `${pieceHeight}px`;
+	for (const group of pieceGroups) {
+		// Resize each piece & reposition relative to group's min grid cell
+		for (const piece of group.pieces) {
+			const gx = parseInt(piece.dataset.correctX, 10);
+			const gy = parseInt(piece.dataset.correctY, 10);
 
-					// Place inside group based on grid offset from group's min
-					const localLeft = (gx - group.minX) * pieceWidth;
-					const localTop = (gy - group.minY) * pieceHeight;
-					piece.style.left = `${localLeft | 0}px`;
-					piece.style.top = `${localTop | 0}px`;
-				}
-			}
-
-			// 3) Clamp each group to keep it within the new board bounds
-			for (const group of pieceGroups) {
-				const groupEl = group.element;
-				const gW = group.widthInPieces * pieceWidth;
-				const gH = group.heightInPieces * pieceHeight;
-
-				const maxX = Math.max(0, puzzleBoard.clientWidth - gW);
-				const maxY = Math.max(0, puzzleBoard.clientHeight - gH);
-
-				const curX = parseFloat(groupEl.style.left) || 0;
-				const curY = parseFloat(groupEl.style.top) || 0;
-
-				const nx = clamp(curX, 0, maxX) | 0;
-				const ny = clamp(curY, 0, maxY) | 0;
-
-				if (nx !== curX) groupEl.style.left = `${nx}px`;
-				if (ny !== curY) groupEl.style.top = `${ny}px`;
-			}
-
-			// 4) Repaint pieces at their new sizes (important for scaling + GIF sync)
-			repaintAllPiecesFromSlice();
-
-			// 5) If the puzzle is already solved, re-center the final group into the new assembly rect
-			if (puzzleSolved && pieceGroups.length === 1) {
-				const finalGroup = pieceGroups[0];
-				finalGroup.element.style.transition = 'left .25s, top .25s';
-				const finalX = assemblyX - (finalGroup.minX * pieceWidth);
-				const finalY = assemblyY - (finalGroup.minY * pieceHeight);
-				finalGroup.element.style.left = `${finalX | 0}px`;
-				finalGroup.element.style.top = `${finalY | 0}px`;
-			}
-		}
-
-		function createPieceCanvas(gridX, gridY, sw, sh) {
-			const piece = document.createElement('canvas');
-			piece.className = 'puzzle-piece';
-
+			// Resize canvas pixels and CSS size
 			piece.width = Math.max(1, pieceWidth);
 			piece.height = Math.max(1, pieceHeight);
-
 			piece.style.width = `${pieceWidth}px`;
 			piece.style.height = `${pieceHeight}px`;
-			piece.style.left = '0px';
-			piece.style.top = '0px';
 
-			piece.dataset.correctX = gridX;
-			piece.dataset.correctY = gridY;
-
-			renderPieceFromCurrentFrame(piece, gridX, gridY, sw, sh);
-
-			return piece;
+			// Place inside group based on grid offset from group's min
+			const localLeft = (gx - group.minX) * pieceWidth;
+			const localTop = (gy - group.minY) * pieceHeight;
+			piece.style.left = `${localLeft | 0}px`;
+			piece.style.top = `${localTop | 0}px`;
 		}
+	}
 
-		function renderPieceFromCurrentFrame(piece, gridX, gridY, sw, sh) {
-			const ctx = piece.getContext('2d', { willReadFrequently: true });
+	// 3) Clamp each group to keep it within the new board bounds
+	for (const group of pieceGroups) {
+		const groupEl = group.element;
+		const gW = group.widthInPieces * pieceWidth;
+		const gH = group.heightInPieces * pieceHeight;
 
-			ctx.clearRect(0, 0, piece.width, piece.height);
+		const maxX = Math.max(0, puzzleBoard.clientWidth - gW);
+		const maxY = Math.max(0, puzzleBoard.clientHeight - gH);
 
-			try {
-				ctx.drawImage(
-					sliceSourceCanvas,
-					gridX * sw, gridY * sh, sw, sh,
-					0, 0, piece.width, piece.height
-				);
-			} catch (err) {
-				log('ERROR drawImage piece', { gridX, gridY, err: String(err) });
-			}
+		const curX = parseFloat(groupEl.style.left) || 0;
+		const curY = parseFloat(groupEl.style.top) || 0;
 
-			if (DEBUG_ENABLED) {
-				try {
-					const w = Math.min(8, piece.width), h = Math.min(8, piece.height);
-					const data = ctx.getImageData(0, 0, w, h).data;
-					let aSum = 0; for (let i = 3; i < data.length; i += 4) aSum += data[i];
-				} catch (err) {
-					log('piece-sample ERROR', String(err));
-				}
-			}
+		const nx = clamp(curX, 0, maxX) | 0;
+		const ny = clamp(curY, 0, maxY) | 0;
+
+		if (nx !== curX) groupEl.style.left = `${nx}px`;
+		if (ny !== curY) groupEl.style.top = `${ny}px`;
+	}
+
+	// 4) Repaint pieces at their new sizes (important for scaling + GIF sync)
+	repaintAllPiecesFromSlice();
+
+	// 5) If the puzzle is already solved, re-center the final group into the new assembly rect
+	if (puzzleSolved && pieceGroups.length === 1) {
+		const finalGroup = pieceGroups[0];
+		finalGroup.element.style.transition = 'left .25s, top .25s';
+		const finalX = assemblyX - (finalGroup.minX * pieceWidth);
+		const finalY = assemblyY - (finalGroup.minY * pieceHeight);
+		finalGroup.element.style.left = `${finalX | 0}px`;
+		finalGroup.element.style.top = `${finalY | 0}px`;
+	}
+}
+
+function createPieceCanvas(gridX, gridY, sw, sh) {
+	const piece = document.createElement('canvas');
+	piece.className = 'puzzle-piece';
+
+	piece.width = Math.max(1, pieceWidth);
+	piece.height = Math.max(1, pieceHeight);
+
+	piece.style.width = `${pieceWidth}px`;
+	piece.style.height = `${pieceHeight}px`;
+	piece.style.left = '0px';
+	piece.style.top = '0px';
+
+	piece.dataset.correctX = gridX;
+	piece.dataset.correctY = gridY;
+
+	renderPieceFromCurrentFrame(piece, gridX, gridY, sw, sh);
+
+	return piece;
+}
+
+function renderPieceFromCurrentFrame(piece, gridX, gridY, sw, sh) {
+	const ctx = piece.getContext('2d', { willReadFrequently: true });
+
+	ctx.clearRect(0, 0, piece.width, piece.height);
+
+	try {
+		ctx.drawImage(
+			sliceSourceCanvas,
+			gridX * sw, gridY * sh, sw, sh,
+			0, 0, piece.width, piece.height
+		);
+	} catch (err) {
+		log('ERROR drawImage piece', { gridX, gridY, err: String(err) });
+	}
+
+	if (DEBUG_ENABLED) {
+		try {
+			const w = Math.min(8, piece.width), h = Math.min(8, piece.height);
+			const data = ctx.getImageData(0, 0, w, h).data;
+			let aSum = 0; for (let i = 3; i < data.length; i += 4) aSum += data[i];
+		} catch (err) {
+			log('piece-sample ERROR', String(err));
 		}
+	}
+}
 
-		function repaintAllPiecesFromSlice() {
-			const sw = sliceSourceW / puzzleSizeX;
-			const sh = sliceSourceH / puzzleSizeY;
-			for (const group of pieceGroups) {
-				for (const piece of group.pieces) {
-					if (!piece || typeof piece.getContext !== 'function') continue;
-					const gx = parseInt(piece.dataset.correctX, 10);
-					const gy = parseInt(piece.dataset.correctY, 10);
-					renderPieceFromCurrentFrame(piece, gx, gy, sw, sh);
-				}
-			}
+function repaintAllPiecesFromSlice() {
+	const sw = sliceSourceW / puzzleSizeX;
+	const sh = sliceSourceH / puzzleSizeY;
+	for (const group of pieceGroups) {
+		for (const piece of group.pieces) {
+			if (!piece || typeof piece.getContext !== 'function') continue;
+			const gx = parseInt(piece.dataset.correctX, 10);
+			const gy = parseInt(piece.dataset.correctY, 10);
+			renderPieceFromCurrentFrame(piece, gx, gy, sw, sh);
 		}
+	}
+}
 
-		/* ================================
-		Animation loop
-		================================ */
-		function startAnimationLoop() {
-			animRunning = true; // timing is driven by Gifler's onDrawFrame
-		}
-		function stopAnimationLoop() {
-			animRunning = false;
-			if (animRAF) cancelAnimationFrame(animRAF);
-			animRAF = null;
-			try { frameSource?.stop?.(); } catch { }
-		}
+/* ================================
+Animation loop
+================================ */
+function startAnimationLoop() {
+	animRunning = true; // timing is driven by Gifler's onDrawFrame
+}
+function stopAnimationLoop() {
+	animRunning = false;
+	if (animRAF) cancelAnimationFrame(animRAF);
+	animRAF = null;
+	try { frameSource?.stop?.(); } catch { }
+}
 
-		/* ================================
-		Dragging / Merge (unchanged behavior)
-		================================ */
-		function createPieceGroup(initialPiece) {
-			const groupElement = document.createElement('div');
-			groupElement.className = 'puzzle-group';
-			groupElement.appendChild(initialPiece);
+/* ================================
+Dragging / Merge (unchanged behavior)
+================================ */
+function createPieceGroup(initialPiece) {
+	const groupElement = document.createElement('div');
+	groupElement.className = 'puzzle-group';
+	groupElement.appendChild(initialPiece);
 
-			const group = {
-				element: groupElement,
-				pieces: [initialPiece],
-				minX: parseInt(initialPiece.dataset.correctX),
-				minY: parseInt(initialPiece.dataset.correctY),
-				widthInPieces: 1,
-				heightInPieces: 1,
-			};
+	const group = {
+		element: groupElement,
+		pieces: [initialPiece],
+		minX: parseInt(initialPiece.dataset.correctX),
+		minY: parseInt(initialPiece.dataset.correctY),
+		widthInPieces: 1,
+		heightInPieces: 1,
+	};
 
-			addDragListeners(group);
-			return group;
-		}
+	addDragListeners(group);
+	return group;
+}
 
-		function placeGroupRandomly(group, boardW, boardH, assemblyRect) {
-			const pw = pieceWidth, ph = pieceHeight;
-			let x, y;
+function placeGroupRandomly(group, boardW, boardH, assemblyRect) {
+	const pw = pieceWidth, ph = pieceHeight;
+	let x, y;
 
-			const placementArea = Math.floor(Math.random() * 4);
-			const safeW = Math.max(0, boardW - pw);
-			const safeH = Math.max(0, boardH - ph);
+	const placementArea = Math.floor(Math.random() * 4);
+	const safeW = Math.max(0, boardW - pw);
+	const safeH = Math.max(0, boardH - ph);
 
-			switch (placementArea) {
-				case 0:
-					x = Math.random() * safeW;
-					y = Math.max(0, Math.random() * Math.max(0, assemblyRect.y - ph));
-					break;
-				case 1:
-					x = Math.random() * safeW;
-					y = (assemblyRect.y + assemblyRect.height) +
-						Math.random() * Math.max(0, boardH - (assemblyRect.y + assemblyRect.height) - ph);
-					break;
-				case 2:
-					x = Math.max(0, Math.random() * Math.max(0, assemblyRect.x - pw));
-					y = Math.random() * safeH;
-					break;
-				default:
-					x = (assemblyRect.x + assemblyRect.width) +
-						Math.random() * Math.max(0, boardW - (assemblyRect.x + assemblyRect.width) - pw);
-					y = Math.random() * safeH;
-					break;
-			}
+	switch (placementArea) {
+		case 0:
+			x = Math.random() * safeW;
+			y = Math.max(0, Math.random() * Math.max(0, assemblyRect.y - ph));
+			break;
+		case 1:
+			x = Math.random() * safeW;
+			y = (assemblyRect.y + assemblyRect.height) +
+				Math.random() * Math.max(0, boardH - (assemblyRect.y + assemblyRect.height) - ph);
+			break;
+		case 2:
+			x = Math.max(0, Math.random() * Math.max(0, assemblyRect.x - pw));
+			y = Math.random() * safeH;
+			break;
+		default:
+			x = (assemblyRect.x + assemblyRect.width) +
+				Math.random() * Math.max(0, boardW - (assemblyRect.x + assemblyRect.width) - pw);
+			y = Math.random() * safeH;
+			break;
+	}
 
-			// Initial placement
-			group.element.style.left = `${Math.max(0, x || 0)}px`;
-			group.element.style.top  = `${Math.max(0, y || 0)}px`;
+	// Initial placement
+	group.element.style.left = `${Math.max(0, x || 0)}px`;
+	group.element.style.top  = `${Math.max(0, y || 0)}px`;
 
-			// Push pieces fully back on-screen if any side overflows ---
-			// (This handles cases where there is no space on a chosen side.)
-			const groupWidth  = group.widthInPieces  * pieceWidth;   // 1 piece initially
-			const groupHeight = group.heightInPieces * pieceHeight;
-			const maxX = Math.max(0, boardW - groupWidth);
-			const maxY = Math.max(0, boardH - groupHeight);
+	// Push pieces fully back on-screen if any side overflows ---
+	// (This handles cases where there is no space on a chosen side.)
+	const groupWidth  = group.widthInPieces  * pieceWidth;   // 1 piece initially
+	const groupHeight = group.heightInPieces * pieceHeight;
+	const maxX = Math.max(0, boardW - groupWidth);
+	const maxY = Math.max(0, boardH - groupHeight);
 
-			let nx = parseFloat(group.element.style.left) || 0;
-			let ny = parseFloat(group.element.style.top)  || 0;
+	let nx = parseFloat(group.element.style.left) || 0;
+	let ny = parseFloat(group.element.style.top)  || 0;
 
-			nx = Math.min(Math.max(nx, 0), maxX);
-			ny = Math.min(Math.max(ny, 0), maxY);
+	nx = Math.min(Math.max(nx, 0), maxX);
+	ny = Math.min(Math.max(ny, 0), maxY);
 
-			group.element.style.left = `${nx | 0}px`;
-			group.element.style.top  = `${ny | 0}px`;
-		}
+	group.element.style.left = `${nx | 0}px`;
+	group.element.style.top  = `${ny | 0}px`;
+}
 
-		function addDragListeners(group) {
-			let offsetX, offsetY;
-			const groupElement = group.element;
+function addDragListeners(group) {
+	let offsetX, offsetY;
+	const groupElement = group.element;
 
-			function onDragStart(e) {
-				if (puzzleSolved) return;
-				e.preventDefault();
+	function onDragStart(e) {
+		if (puzzleSolved) return;
+		e.preventDefault();
 
-				groupElement.classList.add('dragging');
-				puzzleBoard.appendChild(groupElement);
+		groupElement.classList.add('dragging');
+		puzzleBoard.appendChild(groupElement);
 
-				const t = e.touches?.[0] || e;
-				const clientX = t.clientX;
-				const clientY = t.clientY;
+		const t = e.touches?.[0] || e;
+		const clientX = t.clientX;
+		const clientY = t.clientY;
 
-				const rect = groupElement.getBoundingClientRect();
-				offsetX = clientX - rect.left;
-				offsetY = clientY - rect.top;
+		const rect = groupElement.getBoundingClientRect();
+		offsetX = clientX - rect.left;
+		offsetY = clientY - rect.top;
 
-				document.addEventListener('mousemove', onDragMove);
-				document.addEventListener('mouseup', onDragEnd);
-				document.addEventListener('touchmove', onDragMove, { passive: false });
-				document.addEventListener('touchend', onDragEnd);
-			}
+		document.addEventListener('mousemove', onDragMove);
+		document.addEventListener('mouseup', onDragEnd);
+		document.addEventListener('touchmove', onDragMove, { passive: false });
+		document.addEventListener('touchend', onDragEnd);
+	}
 
-			function onDragMove(e) {
-				e.preventDefault();
+	function onDragMove(e) {
+		e.preventDefault();
 
-				const t = e.touches?.[0] || e;
-				const clientX = t.clientX;
-				const clientY = t.clientY;
+		const t = e.touches?.[0] || e;
+		const clientX = t.clientX;
+		const clientY = t.clientY;
 
-				const boardRect = puzzleBoard.getBoundingClientRect();
+		const boardRect = puzzleBoard.getBoundingClientRect();
 
-				let newX = clientX - boardRect.left - offsetX;
-				let newY = clientY - boardRect.top - offsetY;
+		let newX = clientX - boardRect.left - offsetX;
+		let newY = clientY - boardRect.top - offsetY;
 
-				const groupWidth = group.widthInPieces * pieceWidth;
-				const groupHeight = group.heightInPieces * pieceHeight;
+		const groupWidth = group.widthInPieces * pieceWidth;
+		const groupHeight = group.heightInPieces * pieceHeight;
 
-				const maxX = puzzleBoard.clientWidth - groupWidth;
-				const maxY = puzzleBoard.clientHeight - groupHeight;
+		const maxX = puzzleBoard.clientWidth - groupWidth;
+		const maxY = puzzleBoard.clientHeight - groupHeight;
 
-				newX = Math.max(0, Math.min(newX, maxX));
-				newY = Math.max(0, Math.min(newY, maxY));
+		newX = Math.max(0, Math.min(newX, maxX));
+		newY = Math.max(0, Math.min(newY, maxY));
 
-				groupElement.style.left = `${newX | 0}px`;
-				groupElement.style.top = `${newY | 0}px`;
-			}
+		groupElement.style.left = `${newX | 0}px`;
+		groupElement.style.top = `${newY | 0}px`;
+	}
 
-			function onDragEnd() {
-				groupElement.classList.remove('dragging');
+	function onDragEnd() {
+		groupElement.classList.remove('dragging');
 
-				document.removeEventListener('mousemove', onDragMove);
-				document.removeEventListener('mouseup', onDragEnd);
-				document.removeEventListener('touchmove', onDragMove);
-				document.removeEventListener('touchend', onDragEnd);
+		document.removeEventListener('mousemove', onDragMove);
+		document.removeEventListener('mouseup', onDragEnd);
+		document.removeEventListener('touchmove', onDragMove);
+		document.removeEventListener('touchend', onDragEnd);
 
-				checkForMultiSnap(group);
-			}
+		checkForMultiSnap(group);
+	}
 
-			groupElement.addEventListener('mousedown', onDragStart);
-			groupElement.addEventListener('touchstart', onDragStart, { passive: true });
-		}
+	groupElement.addEventListener('mousedown', onDragStart);
+	groupElement.addEventListener('touchstart', onDragStart, { passive: true });
+}
 
-		function checkForMultiSnap(draggedGroup) {
-			let groupToCheck = draggedGroup;
-			let madeAMerge = true;
-			let mergedAny = false;
+function checkForMultiSnap(draggedGroup) {
+	let groupToCheck = draggedGroup;
+	let madeAMerge = true;
+	let mergedAny = false;
 
-			while (madeAMerge) {
-				madeAMerge = false;
+	while (madeAMerge) {
+		madeAMerge = false;
 
-				for (let i = pieceGroups.length - 1; i >= 0; i--) {
-					const stationaryGroup = pieceGroups[i];
-					if (stationaryGroup === groupToCheck) continue;
+		for (let i = pieceGroups.length - 1; i >= 0; i--) {
+			const stationaryGroup = pieceGroups[i];
+			if (stationaryGroup === groupToCheck) continue;
 
-					const snapResult = findAndPerformSnap(groupToCheck, stationaryGroup);
-					if (snapResult) {
-						groupToCheck = stationaryGroup;
-						mergedAny = true;
-						madeAMerge = true;
-						break;
-					}
-				}
-			}
-			// One-time feedback after all chained merges are complete.
-			if (mergedAny) {
-				playClick();
-				runMergeHighlight(groupToCheck);
-			}
-		}
-
-		function findAndPerformSnap(draggedGroup, stationaryGroup) {
-			for (const draggedPiece of draggedGroup.pieces) {
-				for (const stationaryPiece of stationaryGroup.pieces) {
-					const dir = checkAdjacency(draggedPiece, stationaryPiece);
-					if (dir) {
-						alignAndMerge(draggedGroup, stationaryGroup, draggedPiece, stationaryPiece, dir);
-						return true;
-					}
-				}
-			}
-			return false;
-		}
-
-		function checkAdjacency(dp, sp) {
-			const dpX = parseInt(dp.dataset.correctX);
-			const dpY = parseInt(dp.dataset.correctY);
-			const spX = parseInt(sp.dataset.correctX);
-			const spY = parseInt(sp.dataset.correctY);
-
-			const dr = dp.getBoundingClientRect();
-			const sr = sp.getBoundingClientRect();
-
-			if (dpX === spX + 1 && dpY === spY &&
-				Math.abs(dr.left - sr.right) < SNAP_TOLERANCE &&
-				Math.abs(dr.top - sr.top) < SNAP_TOLERANCE) return 'right';
-
-			if (dpX === spX - 1 && dpY === spY &&
-				Math.abs(dr.right - sr.left) < SNAP_TOLERANCE &&
-				Math.abs(dr.top - sr.top) < SNAP_TOLERANCE) return 'left';
-
-			if (dpY === spY + 1 && dpX === spX &&
-				Math.abs(dr.top - sr.bottom) < SNAP_TOLERANCE &&
-				Math.abs(dr.left - sr.left) < SNAP_TOLERANCE) return 'down';
-
-			if (dpY === spY - 1 && dpX === spX &&
-				Math.abs(dr.bottom - sr.top) < SNAP_TOLERANCE &&
-				Math.abs(dr.left - sr.left) < SNAP_TOLERANCE) return 'up';
-
-			return null;
-		}
-
-		function alignAndMerge(dg, sg, dp, sp, direction) {
-			const sgPos = { left: sg.element.offsetLeft, top: sg.element.offsetTop };
-			const spOff = { left: parseFloat(sp.style.left), top: parseFloat(sp.style.top) };
-			const dpOff = { left: parseFloat(dp.style.left), top: parseFloat(dp.style.top) };
-
-			let targetLeft, targetTop;
-
-			switch (direction) {
-				case 'right':
-					targetLeft = sgPos.left + spOff.left + pieceWidth - dpOff.left;
-					targetTop = sgPos.top + spOff.top - dpOff.top;
-					break;
-				case 'left':
-					targetLeft = sgPos.left + spOff.left - pieceWidth - dpOff.left;
-					targetTop = sgPos.top + spOff.top - dpOff.top;
-					break;
-				case 'down':
-					targetLeft = sgPos.left + spOff.left - dpOff.left;
-					targetTop = sgPos.top + spOff.top + pieceHeight - dpOff.top;
-					break;
-				case 'up':
-					targetLeft = sgPos.left + spOff.left - dpOff.left;
-					targetTop = sgPos.top + spOff.top - pieceHeight - dpOff.top;
-					break;
-			}
-
-			dg.element.style.left = `${targetLeft | 0}px`;
-			dg.element.style.top = `${targetTop | 0}px`;
-
-			mergeGroups(dg, sg);
-		}
-
-		function mergeGroups(dg, sg) {
-			const dEl = dg.element;
-			const sEl = sg.element;
-
-			const offsetX = dEl.offsetLeft - sEl.offsetLeft;
-			const offsetY = dEl.offsetTop - sEl.offsetTop;
-
-			while (dEl.firstChild) {
-				const node = dEl.firstChild;
-				// If this is a transient visual overlay, just drop it.
-				if (node.nodeType === 1 && node.classList && node.classList.contains('merge-highlight')) {
-					node.remove();
-					continue;
-				}
-				// Move node into sg
-				if (node.style) {
-					node.style.left = `${(parseFloat(node.style.left || '0') + offsetX) | 0}px`;
-					node.style.top = `${(parseFloat(node.style.top || '0') + offsetY) | 0}px`;
-				}
-				sEl.appendChild(node);
-				// Only canvases are puzzle pieces
-				if (node.tagName === 'CANVAS') {
-					sg.pieces.push(node);
-				}
-			}
-
-			let minX = Infinity, minY = Infinity;
-			for (const p of sg.pieces) {
-				const l = parseFloat(p.style.left);
-				const t = parseFloat(p.style.top);
-				if (l < minX) minX = l;
-				if (t < minY) minY = t;
-			}
-
-			if (minX || minY) {
-				sEl.style.left = `${(sEl.offsetLeft + minX) | 0}px`;
-				sEl.style.top = `${(sEl.offsetTop + minY) | 0}px`;
-
-				for (const p of sg.pieces) {
-					p.style.left = `${(parseFloat(p.style.left) - minX) | 0}px`;
-					p.style.top = `${(parseFloat(p.style.top) - minY) | 0}px`;
-				}
-			}
-
-			puzzleBoard.removeChild(dEl);
-			pieceGroups = pieceGroups.filter(g => g !== dg);
-
-			sg.minX = Math.min(sg.minX, dg.minX);
-			sg.minY = Math.min(sg.minY, dg.minY);
-
-			let maxX = sg.minX, maxY = sg.minY;
-			for (const p of sg.pieces) {
-				const px = parseInt(p.dataset.correctX);
-				const py = parseInt(p.dataset.correctY);
-				if (px > maxX) maxX = px;
-				if (py > maxY) maxY = py;
-			}
-
-			sg.widthInPieces = maxX - sg.minX + 1;
-			sg.heightInPieces = maxY - sg.minY + 1;
-
-			checkWinCondition();
-		}
-
-		function checkWinCondition() {
-			if (pieceGroups.length === 1 &&
-				pieceGroups[0].pieces.length === puzzleSizeX * puzzleSizeY) {
-
-				const finalGroup = pieceGroups[0];
-
-				const finalX = assemblyArea.offsetLeft - (finalGroup.minX * pieceWidth);
-				const finalY = assemblyArea.offsetTop - (finalGroup.minY * pieceHeight);
-
-				finalGroup.element.style.transition = 'left .5s, top .5s, filter .5s';
-				finalGroup.element.style.left = `${finalX}px`;
-				finalGroup.element.style.top = `${finalY}px`;
-				finalGroup.element.style.cursor = 'default';
-				finalGroup.element.style.zIndex = '5';
-				finalGroup.element.style.filter = 'none';
-
-				puzzleSolved = true;
-				winMessage.classList.add('show');
+			const snapResult = findAndPerformSnap(groupToCheck, stationaryGroup);
+			if (snapResult) {
+				groupToCheck = stationaryGroup;
+				mergedAny = true;
+				madeAMerge = true;
+				break;
 			}
 		}
+	}
+	// One-time feedback after all chained merges are complete.
+	if (mergedAny) {
+		playClick();
+		runMergeHighlight(groupToCheck);
+	}
+}
+
+function findAndPerformSnap(draggedGroup, stationaryGroup) {
+	for (const draggedPiece of draggedGroup.pieces) {
+		for (const stationaryPiece of stationaryGroup.pieces) {
+			const dir = checkAdjacency(draggedPiece, stationaryPiece);
+			if (dir) {
+				alignAndMerge(draggedGroup, stationaryGroup, draggedPiece, stationaryPiece, dir);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+function checkAdjacency(dp, sp) {
+	const dpX = parseInt(dp.dataset.correctX);
+	const dpY = parseInt(dp.dataset.correctY);
+	const spX = parseInt(sp.dataset.correctX);
+	const spY = parseInt(sp.dataset.correctY);
+
+	const dr = dp.getBoundingClientRect();
+	const sr = sp.getBoundingClientRect();
+
+	if (dpX === spX + 1 && dpY === spY &&
+		Math.abs(dr.left - sr.right) < SNAP_TOLERANCE &&
+		Math.abs(dr.top - sr.top) < SNAP_TOLERANCE) return 'right';
+
+	if (dpX === spX - 1 && dpY === spY &&
+		Math.abs(dr.right - sr.left) < SNAP_TOLERANCE &&
+		Math.abs(dr.top - sr.top) < SNAP_TOLERANCE) return 'left';
+
+	if (dpY === spY + 1 && dpX === spX &&
+		Math.abs(dr.top - sr.bottom) < SNAP_TOLERANCE &&
+		Math.abs(dr.left - sr.left) < SNAP_TOLERANCE) return 'down';
+
+	if (dpY === spY - 1 && dpX === spX &&
+		Math.abs(dr.bottom - sr.top) < SNAP_TOLERANCE &&
+		Math.abs(dr.left - sr.left) < SNAP_TOLERANCE) return 'up';
+
+	return null;
+}
+
+function alignAndMerge(dg, sg, dp, sp, direction) {
+	const sgPos = { left: sg.element.offsetLeft, top: sg.element.offsetTop };
+	const spOff = { left: parseFloat(sp.style.left), top: parseFloat(sp.style.top) };
+	const dpOff = { left: parseFloat(dp.style.left), top: parseFloat(dp.style.top) };
+
+	let targetLeft, targetTop;
+
+	switch (direction) {
+		case 'right':
+			targetLeft = sgPos.left + spOff.left + pieceWidth - dpOff.left;
+			targetTop = sgPos.top + spOff.top - dpOff.top;
+			break;
+		case 'left':
+			targetLeft = sgPos.left + spOff.left - pieceWidth - dpOff.left;
+			targetTop = sgPos.top + spOff.top - dpOff.top;
+			break;
+		case 'down':
+			targetLeft = sgPos.left + spOff.left - dpOff.left;
+			targetTop = sgPos.top + spOff.top + pieceHeight - dpOff.top;
+			break;
+		case 'up':
+			targetLeft = sgPos.left + spOff.left - dpOff.left;
+			targetTop = sgPos.top + spOff.top - pieceHeight - dpOff.top;
+			break;
+	}
+
+	dg.element.style.left = `${targetLeft | 0}px`;
+	dg.element.style.top = `${targetTop | 0}px`;
+
+	mergeGroups(dg, sg);
+}
+
+function mergeGroups(dg, sg) {
+	const dEl = dg.element;
+	const sEl = sg.element;
+
+	const offsetX = dEl.offsetLeft - sEl.offsetLeft;
+	const offsetY = dEl.offsetTop - sEl.offsetTop;
+
+	while (dEl.firstChild) {
+		const node = dEl.firstChild;
+		// If this is a transient visual overlay, just drop it.
+		if (node.nodeType === 1 && node.classList && node.classList.contains('merge-highlight')) {
+			node.remove();
+			continue;
+		}
+		// Move node into sg
+		if (node.style) {
+			node.style.left = `${(parseFloat(node.style.left || '0') + offsetX) | 0}px`;
+			node.style.top = `${(parseFloat(node.style.top || '0') + offsetY) | 0}px`;
+		}
+		sEl.appendChild(node);
+		// Only canvases are puzzle pieces
+		if (node.tagName === 'CANVAS') {
+			sg.pieces.push(node);
+		}
+	}
+
+	let minX = Infinity, minY = Infinity;
+	for (const p of sg.pieces) {
+		const l = parseFloat(p.style.left);
+		const t = parseFloat(p.style.top);
+		if (l < minX) minX = l;
+		if (t < minY) minY = t;
+	}
+
+	if (minX || minY) {
+		sEl.style.left = `${(sEl.offsetLeft + minX) | 0}px`;
+		sEl.style.top = `${(sEl.offsetTop + minY) | 0}px`;
+
+		for (const p of sg.pieces) {
+			p.style.left = `${(parseFloat(p.style.left) - minX) | 0}px`;
+			p.style.top = `${(parseFloat(p.style.top) - minY) | 0}px`;
+		}
+	}
+
+	puzzleBoard.removeChild(dEl);
+	pieceGroups = pieceGroups.filter(g => g !== dg);
+
+	sg.minX = Math.min(sg.minX, dg.minX);
+	sg.minY = Math.min(sg.minY, dg.minY);
+
+	let maxX = sg.minX, maxY = sg.minY;
+	for (const p of sg.pieces) {
+		const px = parseInt(p.dataset.correctX);
+		const py = parseInt(p.dataset.correctY);
+		if (px > maxX) maxX = px;
+		if (py > maxY) maxY = py;
+	}
+
+	sg.widthInPieces = maxX - sg.minX + 1;
+	sg.heightInPieces = maxY - sg.minY + 1;
+
+	checkWinCondition();
+}
+
+function checkWinCondition() {
+	if (pieceGroups.length === 1 &&
+		pieceGroups[0].pieces.length === puzzleSizeX * puzzleSizeY) {
+
+		const finalGroup = pieceGroups[0];
+
+		const finalX = assemblyArea.offsetLeft - (finalGroup.minX * pieceWidth);
+		const finalY = assemblyArea.offsetTop - (finalGroup.minY * pieceHeight);
+
+		finalGroup.element.style.transition = 'left .5s, top .5s, filter .5s';
+		finalGroup.element.style.left = `${finalX}px`;
+		finalGroup.element.style.top = `${finalY}px`;
+		finalGroup.element.style.cursor = 'default';
+		finalGroup.element.style.zIndex = '5';
+		finalGroup.element.style.filter = 'none';
+
+		puzzleSolved = true;
+		winMessage.classList.add('show');
+	}
+}
 	</script>
 </body>
 </html>
