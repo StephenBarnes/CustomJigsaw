@@ -598,8 +598,27 @@ let animRunning = false;
 function clamp(val, min, max) { return Math.max(min, Math.min(val, max)); }
 
 /* ================================
-Building difficulty options around current image aspect.
+Difficulty options
 ================================ */
+const MIN_DEFAULT_PIECES = 13; // default difficulty is chosen so we get at least 13 pieces
+let userSetDifficulty = localStorage.getItem('jigsaw-user-set-difficulty') === 'true';
+let lastManualPieceCount = parseInt(localStorage.getItem('jigsaw-last-manual-pieces') || '', 10);
+if (Number.isNaN(lastManualPieceCount)) lastManualPieceCount = null;
+
+difficultySelect.addEventListener('change', () => {
+	const [gx, gy] = difficultySelect.value.split('x').map(Number);
+	puzzleSizeX = gx;
+	puzzleSizeY = gy;
+	log('difficulty.change → rebuild');
+	createPuzzle();
+
+	// Remember this manual selection, so in the future we default to the difficulty that produces roughly this many pieces.
+	userSetDifficulty = true;
+	lastManualPieceCount = puzzleSizeX * puzzleSizeY;
+	localStorage.setItem('jigsaw-user-set-difficulty', 'true');
+	localStorage.setItem('jigsaw-last-manual-pieces', String(lastManualPieceCount));
+});
+
 function buildDifficultyOptions() {
 	if (!frameSource?.ready) {
 		difficultySelect.innerHTML = '';
@@ -637,20 +656,33 @@ function buildDifficultyOptions() {
 		}
 	}
 
-	// Sort by approx number of pieces (ascending)
+	// Sort by number of pieces
 	deduped.sort((a, b) => (a[0] * a[1]) - (b[0] * b[1]));
 
-	// Fill the <select>, keep the previously-selected value if possible
+	// Fill the <select>
 	const prev = `${puzzleSizeX}x${puzzleSizeY}`;
 	difficultySelect.innerHTML = deduped.map(([gx, gy]) =>
 		`<option value="${gx}x${gy}">${gx}×${gy}</option>`).join('');
 
-	const first = deduped[0];
-	const fallbackVal = `${first[0]}x${first[1]}`;
-
-	const toSelect = difficultySelect.querySelector(`option[value="${prev}"]`)
-		? prev : fallbackVal;
-
+	/* Choose default per rules:
+	1) If user manually chose a difficulty previously, pick the count closest to that.
+	2) Otherwise choose the lowest count >= MIN_DEFAULT_PIECES.
+	3) Fallback to the largest available if everything is below MIN_DEFAULT_PIECES. */
+	const withCounts = deduped.map(([gx, gy]) => ({ gx, gy, count: gx * gy }));
+	let chosen;
+	if (userSetDifficulty && lastManualPieceCount) {
+		chosen = withCounts.reduce((best, cur) => {
+			const bd = Math.abs(best.count - lastManualPieceCount);
+			const cd = Math.abs(cur.count  - lastManualPieceCount);
+			// tie-break to the smaller grid if equally close
+			if (cd < bd) return cur;
+			if (cd === bd && cur.count < best.count) return cur;
+			return best;
+		}, withCounts[0]);
+	} else {
+		chosen = withCounts.find(c => c.count >= MIN_DEFAULT_PIECES) || withCounts[withCounts.length - 1];
+	}
+	const toSelect = `${chosen.gx}x${chosen.gy}`;
 	difficultySelect.value = toSelect;
 
 	// Apply to state
@@ -708,14 +740,6 @@ imageLoader.addEventListener('change', e => {
 	srcFile = file;
 	loadFromFile(file);
 	collapseTopPanelForMobile(); // Auto-collapse only on mobile after a selection
-});
-
-difficultySelect.addEventListener('change', () => {
-	const [gx, gy] = difficultySelect.value.split('x').map(Number);
-	puzzleSizeX = gx;
-	puzzleSizeY = gy;
-	log('difficulty.change → rebuild');
-	createPuzzle();
 });
 
 scrambleBtn.addEventListener('click', () => {
