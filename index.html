@@ -347,9 +347,12 @@
 	<div id="info-modal" class="fixed inset-0 z-[10000] hidden">
 		<div id="info-backdrop" class="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
 
-		<div role="dialog" aria-modal="true" aria-labelledby="info-title" class="absolute inset-x-4 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 top-16 sm:top-24
+		<div role="dialog" aria-modal="true" aria-labelledby="info-title"
+			class="fixed inset-x-4 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 top-16 sm:top-24
 				max-w-prose rounded-xl shadow-lg border border-slate-200 dark:border-slate-700
-				bg-white dark:bg-slate-800 p-4">
+				bg-white dark:bg-slate-800 p-4
+				flex flex-col overflow-hidden
+				max-h-[calc(100dvh-4rem)] sm:max-h-[calc(100dvh-6rem)]">
 			<div class="flex items-start justify-between gap-4">
 				<h2 id="info-title" class="text-base font-semibold">More info</h2>
 				<button id="info-close" type="button" class="rounded-md p-1 text-slate-600 dark:text-slate-300
@@ -364,7 +367,7 @@
 				</button>
 			</div>
 
-			<div id="info-content" class="mt-2 text-m leading-relaxed">
+			<div id="info-content" class="mt-2 text-m leading-relaxed flex-1 overflow-y-auto overscroll-contain pr-1">
 				<p>This is an online game that generates jigsaw puzzles from files on your computer. It supports images, GIFs, and videos in WEBM/MP4 format. If the video has audio, you can enable it using the checkbox.</p>
 				<p>This game runs entirely in your browser. Your files are not uploaded to any other computer.</p>
 				<p>You can save this webpage to play the game offline. You should save it as a "complete webpage", not "HTML only". (This has not been thoroughly tested yet.) The game also works on phones.</p>
