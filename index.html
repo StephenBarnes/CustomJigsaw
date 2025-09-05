@@ -155,6 +155,9 @@
 		#info-content p {
 			margin: 1rem;
 		}
+		#info-content a {
+			color: blue;
+		}
 
 		#win-message {
 			position: absolute;
@@ -266,7 +269,6 @@
 
 					<!-- Bottom row (secondary controls) -->
 					<div class="flex items-center gap-4 flex-wrap">
-						<!-- Shown only when a video with audio is loaded -->
 						<label id="audio-controls" class="flex items-center gap-2 text-sm select-none">
 							<input id="audio-toggle" type="checkbox" class="cursor-pointer">
 							<span class="font-medium">Audio</span>
@@ -276,7 +278,11 @@
 							<input id="dark-mode-toggle" type="checkbox" class="cursor-pointer">
 							<span class="font-medium">Dark</span>
 						</label>
-
+						<!-- Haptics toggle (shown only if the browser supports vibration) -->
+						<label id="haptics-controls" class="flex items-center gap-2 text-sm select-none">
+							<input id="haptics-toggle" type="checkbox" class="cursor-pointer">
+							<span class="font-medium">Haptics</span>
+						</label>
 						<label class="flex items-center gap-2 text-sm select-none">
 							<input id="ui-debug-toggle" type="checkbox" class="cursor-pointer">
 							<span class="font-medium">Debug</span>
@@ -388,6 +394,8 @@ const winMessage = document.getElementById('win-message');
 const uiDebugToggle = document.getElementById('ui-debug-toggle');
 const darkToggle = document.getElementById('dark-mode-toggle');
 uiDebugToggle.checked = false;
+const hapticsControls = document.getElementById('haptics-controls');
+const hapticsToggle   = document.getElementById('haptics-toggle');
 
 // Audio elements
 const audioControls = document.getElementById('audio-controls');
@@ -472,6 +480,37 @@ function syncTopExpander() {
 		topExpander?.classList.add('hidden');
 	}
 }
+
+/* ================================
+Haptics (Vibration API)
+================================ */
+function vibrate(pattern) {
+	try {
+		if (!('vibrate' in navigator)) return false;      // not supported (e.g., iOS Safari)
+		if (!hapticsToggle?.checked) return false;        // user turned it off
+		return navigator.vibrate(pattern);
+	} catch {
+		return false;
+	}
+}
+(function initHaptics() {
+	const supported = ('vibrate' in navigator);
+	if (!supported) {
+		// Hide the toggle completely if unsupported (e.g., iOS Safari)
+		try { hapticsControls?.remove(); } catch { }
+		return;
+	}
+
+	// Default ON for touch devices, unless the user previously chose.
+	const saved = localStorage.getItem('jigsaw-haptics-enabled');
+	const defaultOn = (navigator.maxTouchPoints > 0) || ('ontouchstart' in window);
+	hapticsToggle.checked = (saved === 'true') || (saved === null && defaultOn);
+
+	hapticsToggle.addEventListener('change', () => {
+		localStorage.setItem('jigsaw-haptics-enabled', hapticsToggle.checked ? 'true' : 'false');
+		if (hapticsToggle.checked) vibrate(8); // tiny confirmation tap
+	});
+})();
 
 /* ================================
 Info modal: open/close + back button + Esc + outside click
@@ -1850,6 +1889,7 @@ function checkForMultiSnap(draggedGroup) {
 	if (mergedAny) {
 		playClick();
 		runMergeHighlight(groupToCheck);
+		vibrate(12);
 	}
 }
 
@@ -2007,6 +2047,8 @@ function checkWinCondition() {
 		finalGroup.element.style.filter = 'none';
 
 		puzzleSolved = true;
+		// Victory haptics: short celebratory pattern. TODO maybe remove?
+		vibrate([15, 35, 15, 35, 30]);
 		winMessage.classList.add('show');
 	}
 }
