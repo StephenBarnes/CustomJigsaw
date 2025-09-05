@@ -262,21 +262,19 @@
 							disabled>Scramble</button>
 					</div>
 
-					<!-- Thin divider only on narrow screens -->
 					<div class="h-px bg-slate-200 dark:bg-slate-700 sm:hidden"></div>
 
 					<!-- Bottom row (secondary controls) -->
-					<div class="flex items-center gap-4 flex-wrap sm:pl-4 sm:ml-4 sm:border-l sm:border-slate-200 dark:sm:border-slate-700">
-						<label class="flex items-center gap-2 text-sm select-none">
-							<input id="dark-mode-toggle" type="checkbox" class="cursor-pointer">
-							<span class="font-medium">Dark</span>
-						</label>
-
+					<div class="flex items-center gap-4 flex-wrap">
 						<!-- Shown only when a video with audio is loaded -->
 						<label id="audio-controls" class="flex items-center gap-2 text-sm select-none">
 							<input id="audio-toggle" type="checkbox" class="cursor-pointer">
 							<span class="font-medium">Audio</span>
 							<input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.8" class="w-24">
+						</label>
+						<label class="flex items-center gap-2 text-sm select-none sm:border-l sm:border-slate-200 dark:sm:border-slate-500 sm:pl-4 sm:ml-4">
+							<input id="dark-mode-toggle" type="checkbox" class="cursor-pointer">
+							<span class="font-medium">Dark</span>
 						</label>
 
 						<label class="flex items-center gap-2 text-sm select-none">
